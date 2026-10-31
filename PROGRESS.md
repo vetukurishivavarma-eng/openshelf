@@ -18,13 +18,15 @@ Done:
 
 4. Security test done: docs/security-report.md. Verdict: not ready for real money; H1-H3 are launch blockers.
 
+5. QA done: docs/qa-report.md. Screens retaken in docs/screens.
+
 In progress:
-5. QA running in the main folder (browser journeys, retaking docs/screens); report not received yet. If the
-   session stopped, restart QA: its findings are NOT saved anywhere.
+6. Lead developer fixing every finding in docs/security-report.md and docs/qa-report.md. Check with
+   `git log` and `npm test` how far it got; findings are not fixed unless the tests prove it.
 
 To do:
-6. Lead developer fixes H1-H3, M1-M8, the render.yaml build line, and QA findings. CSP may block Razorpay Checkout.
-7. Final verification by the product owner.
+7. Final verification by the product owner, retest of the High items.
+8. Real-service testing, which needs the owner's accounts.
 
 Needed from the owner: Razorpay and Shiprocket/Delhivery accounts (own KYC), Google OAuth client, a durable
 database for launch, a final name and domain.
