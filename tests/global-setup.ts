@@ -13,6 +13,7 @@ export default async function setup() {
 		password: 'postgres',
 		port,
 		persistent: false,
+		initdbFlags: ['--encoding=UTF8', '--locale=C'],
 		onLog: () => {}
 	});
 	await pg.initialise();

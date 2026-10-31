@@ -1,16 +1,17 @@
 import { building, dev } from '$app/environment';
 import type { Handle, ServerInit } from '@sveltejs/kit';
 import { sessionUser } from '$lib/server/auth';
-import { sweep } from '$lib/server/engine';
-import { assertConfig } from '$lib/server/payments';
+import { cancelTestOrders, sweep } from '$lib/server/engine';
+import { assertConfig, paymentsTestMode } from '$lib/server/payments';
 
 const run = () => sweep().catch((e) => console.error('[sweep]', e));
 
 export const init: ServerInit = async () => {
 	if (building) return;
 	assertConfig(!dev);
+	if (!paymentsTestMode()) await cancelTestOrders();
 	void run();
-	setInterval(run, 60 * 60 * 1000).unref();
+	setInterval(run, 5 * 60 * 1000).unref();
 };
 
 export const handle: Handle = async ({ event, resolve }) => {

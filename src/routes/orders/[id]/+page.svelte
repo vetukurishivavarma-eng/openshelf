@@ -2,14 +2,19 @@
 	import { BRAND } from '$lib/brand';
 	import { invalidateAll } from '$app/navigation';
 	import { CONDITION_LABEL, ORDER_STATUS, REFUND_STATUS, fmtDate, fmtDeadline, rupees } from '$lib/labels';
+	import Alert from '$lib/ui/Alert.svelte';
 	import Icon from '$lib/ui/Icon.svelte';
+	import { once } from '$lib/ui/once';
 	let { data, form } = $props();
 	const o = $derived(data.order);
 	const giver = $derived(o.role === 'giver');
-	const other = $derived(giver ? o.reader_name : o.giver_name);
 	const courier = $derived(o.method === 'post');
+	const nameOf = (name: string | null, fallback: string) =>
+		!name ? fallback : name === 'Former' ? 'a former reader' : name;
+	const other = $derived(giver ? nameOf(o.reader_name, 'the reader') : nameOf(o.giver_name, 'the giver'));
+	const Other = $derived(other[0].toUpperCase() + other.slice(1));
 
-	// Hours each open state lasts. Mirrors the windows in sweep(), src/lib/server/engine.ts.
+	// Mirrors DEADLINE_HOURS in src/lib/server/engine.ts.
 	const WINDOW_HOURS: Record<string, number> = { requested: 0.5, paid: 72, pickup_booked: 5 * 24, delivered: 14 * 24 };
 	const by = $derived(
 		WINDOW_HOURS[o.status]
@@ -24,30 +29,30 @@
 				return { act: true, title: `Pay by ${by} to reserve this book`, body: 'The book is held for you until then. Payment makes the reservation final.' };
 			case 'paid':
 				return giver
-					? { act: true, title: `Accept or decline by ${by}`, body: `${other} has paid for this book. If you do nothing, the order expires and ${other} is refunded in full.` }
-					: { act: false, title: `${other} has until ${by} to answer`, body: 'If the giver declines or does not reply, you get a full refund.' };
+					? { act: true, title: `Accept or decline by ${by}`, body: `${Other} has paid for this book. If you do nothing, the order expires and they are refunded in full.` }
+					: { act: false, title: `The giver has until ${by} to answer`, body: 'If they decline or do not reply, you get a full refund. Their note reaches you when they accept.' };
 			case 'pickup_booked':
 				if (courier)
 					return giver
-						? { act: false, title: 'The courier will collect from you', body: `Keep the book ready. If it is not collected by ${by}, the order is refunded and the book returns to your shelf.` }
-						: { act: false, title: 'The pickup is booked', body: `If the courier cannot collect by ${by}, you get a full refund.` };
+						? { act: false, title: 'The courier will collect from you', body: `Keep the book ready. If it is not collected by ${by}, we check with the courier, then refund or ask an admin to look.` }
+						: { act: false, title: 'The pickup is booked', body: `If the courier cannot collect by ${by}, we check with them and refund you, or an admin reviews the order.` };
 				return giver
-					? { act: true, title: `Hand the book over by ${by}`, body: `Agree a place with ${other} on WhatsApp. Meet somewhere public.` }
-					: { act: true, title: `Agree a handover with ${other}`, body: `Message on WhatsApp and pick a public place. If it does not happen by ${by}, you get a full refund.` };
+					? { act: true, title: `Hand the book over by ${by}`, body: `Agree a place with ${other} on WhatsApp and meet somewhere public. If it does not happen by then, an admin reviews the order. You can also cancel, which refunds them in full.` }
+					: { act: true, title: `Agree a handover with ${other}`, body: `Message on WhatsApp and pick a public place. If something goes wrong, raise a dispute. If it does not happen by ${by}, an admin reviews the order.` };
 			case 'in_transit':
-				return { act: false, title: 'The book is on its way', body: 'The courier has it. We update this page as it moves.' };
+				return { act: false, title: 'The book is on its way', body: 'The courier has it. If the courier reports a failure, or nothing moves for 21 days, an admin reviews the order.' };
 			case 'delivered':
 				return giver
-					? { act: false, title: `${other} confirms by ${by}`, body: 'If they stay silent, the order confirms itself at that time.' }
+					? { act: false, title: `${Other} confirms by ${by}`, body: 'If they stay silent, the order confirms itself at that time.' }
 					: { act: true, title: `Confirm or raise a problem by ${by}`, body: 'Press the button once the book is with you. If you do neither, the order confirms itself.' };
 			case 'disputed':
 				return { act: false, title: 'An admin is reviewing this order', body: 'There is nothing for you to do. If the dispute is upheld, the reader is refunded in full.' };
 			case 'received':
-				return giver
-					? { act: false, title: 'Your book reached its next reader', body: 'Thank you for passing it on.' }
-					: { act: !o.onward_id, title: 'The book is yours', body: 'Send a thank-you, and when you finish it, give it onward. Its journey carries on.' };
+				if (giver) return { act: false, title: 'Your book reached its next reader', body: 'Thank you for passing it on.' };
+				if (o.onward_id) return { act: false, title: 'The book is yours', body: o.thank_you ? 'You thanked the giver and gave it onward. Its journey carries on.' : 'You gave it onward. Its journey carries on.' };
+				return { act: true, title: 'The book is yours', body: o.thank_you ? 'Your thank-you is sent. When you finish the book, give it onward.' : 'Send a thank-you, and when you finish it, give it onward. Its journey carries on.' };
 			case 'declined':
-				return { act: false, title: giver ? 'You declined this order' : `${other} declined this order`, body: giver ? 'The book is back on the shelf.' : 'Your payment is being refunded in full.' };
+				return { act: false, title: giver ? 'You declined this order' : 'The giver declined this order', body: giver ? 'The book is back on the shelf.' : 'Your payment is being refunded in full.' };
 			case 'cancelled':
 				return { act: false, title: 'This order was cancelled', body: 'Any payment is refunded in full.' };
 			case 'expired':
@@ -57,16 +62,24 @@
 		}
 	});
 
-	// The slip: every state this order has passed through, then the ones it can still reach.
+	// The slip: only steps this order really reached, then the ones it can still reach.
 	const path = $derived.by(() => {
-		if (['declined', 'cancelled', 'expired'].includes(o.status)) return ['requested', o.status];
+		if (['declined', 'cancelled', 'expired'].includes(o.status))
+			return o.status === 'cancelled' || !o.paid ? ['requested', o.status] : ['requested', 'paid', o.status];
 		const route = courier ? ['requested', 'paid', 'pickup_booked', 'in_transit', 'delivered'] : ['requested', 'paid', 'pickup_booked', 'delivered'];
-		if (o.status === 'refunded') return [...route.slice(0, 3), 'refunded'];
-		if (o.status === 'disputed') return [...route, 'disputed', 'received'];
+		const upTo = (step: string) => route.slice(0, route.indexOf(step) + 1);
+		if (o.disputed_from) return [...upTo(o.disputed_from), 'disputed', o.status === 'refunded' ? 'refunded' : 'received'];
+		if (o.status === 'refunded') return [...upTo('pickup_booked'), 'refunded'];
 		return [...route, 'received'];
 	});
 	const at = $derived(path.indexOf(o.status));
 	const stepName = (step: string) => (step === 'pickup_booked' ? (courier ? 'Pickup booked' : 'Handover agreed') : ORDER_STATUS[step]);
+	const canDispute = $derived(
+		!giver && (o.status === 'delivered' || o.status === 'in_transit' || (o.status === 'pickup_booked' && !courier))
+	);
+	const canCancel = $derived(
+		giver ? o.status === 'pickup_booked' && !courier : o.status === 'requested' || o.status === 'paid'
+	);
 
 	let waiting = $state(false);
 	function pay() {
@@ -103,8 +116,8 @@
 
 	<div class="order">
 		<div>
-			{#if form?.error}<p class="alert" role="alert"><Icon name="alert" />{form.error}</p>{/if}
-			{#if form?.reported}<p class="note" role="status"><Icon name="check" />Thanks. An admin will look at your report.</p>{/if}
+			{#if form?.error}<Alert message={form.error} />{/if}
+			{#if data.reported}<p class="note" role="status"><Icon name="check" />Thanks. An admin will look at your report.</p>{/if}
 
 			<section class="next" class:act={next.act} aria-labelledby="next">
 				<p class="typed">{next.act ? 'Your move' : 'Where it stands'}</p>
@@ -128,7 +141,7 @@
 
 				{#if o.status === 'requested' && !giver}
 					{#if data.testControls}
-						<form method="post" action="?/testpay"><button class="btn primary wide">Pay {rupees(o.total_paise ?? 0)} (test, no money moves)</button></form>
+						<form method="post" action="?/testpay" use:once><button class="btn primary wide">Pay {rupees(o.total_paise ?? 0)} (test, no money moves)</button></form>
 					{:else if waiting}
 						<p class="note" role="status"><Icon name="clock" />Confirming your payment…</p>
 					{:else}
@@ -137,32 +150,32 @@
 				{/if}
 
 				{#if o.status === 'paid' && giver}
-					<form method="post" action="?/accept">
+					<form method="post" action="?/accept" use:once>
 						{#if courier}
 							<label>
 								Pickup address
-								<small>Where the courier collects the book. Only the courier gets this, and it is wiped when the order ends.</small>
-								<textarea name="pickup_address" required minlength="10" maxlength="500"></textarea>
+								<small>Where the courier collects the book, in the pincode on your profile. Only the courier gets this, and it is wiped when the order ends.</small>
+								<textarea name="pickup_address" required minlength="10" maxlength="500" defaultValue={form?.pickup_address ?? ''}></textarea>
 							</label>
 						{/if}
 						<button class="btn primary">Accept</button>
 					</form>
-					<form method="post" action="?/decline"><button class="btn">Decline</button></form>
+					<form method="post" action="?/decline" use:once><button class="btn">Decline</button></form>
 				{/if}
 
 				{#if o.status === 'pickup_booked' && giver && !courier}
-					<form method="post" action="?/handover"><button class="btn primary">I have handed it over</button></form>
+					<form method="post" action="?/handover" use:once><button class="btn primary">I have handed it over</button></form>
 				{/if}
 
 				{#if o.status === 'delivered' && !giver}
-					<form method="post" action="?/received"><button class="btn primary">I have the book</button></form>
+					<form method="post" action="?/received" use:once><button class="btn primary">I have the book</button></form>
 				{/if}
 
-				{#if (o.status === 'delivered' || o.status === 'in_transit') && !giver}
-					<details>
+				{#if canDispute}
+					<details open={!!form?.dispute_note}>
 						<summary>Something wrong?</summary>
-						<form method="post" action="?/dispute">
-							<label>What went wrong? <textarea name="note" required maxlength="500"></textarea></label>
+						<form method="post" action="?/dispute" use:once>
+							<label>What went wrong? <textarea name="note" required maxlength="500" defaultValue={form?.dispute_note ?? ''}></textarea></label>
 							<button class="btn">Raise a dispute</button>
 						</form>
 					</details>
@@ -171,7 +184,7 @@
 
 			{#if o.note}
 				<section aria-labelledby="note">
-					<h2 id="note">{giver ? 'Your note to the next reader' : 'A note from the last reader'}</h2>
+					<h2 id="note">{giver ? 'Your note to the next reader' : 'A note from the giver'}</h2>
 					<p class="letter">{o.note}</p>
 				</section>
 			{/if}
@@ -182,11 +195,11 @@
 					<p class="letter">{o.thank_you}</p>
 				</section>
 			{:else if o.status === 'received' && !giver}
-				<form method="post" action="?/thanks">
+				<form method="post" action="?/thanks" use:once>
 					<label>
 						Say thank you
 						<small>Up to 280 characters. Only the giver reads it.</small>
-						<textarea name="message" required maxlength="280"></textarea>
+						<textarea name="message" required maxlength="280" defaultValue={form?.message ?? ''}></textarea>
 					</label>
 					<button class="btn">Send thank-you</button>
 				</form>
@@ -196,7 +209,7 @@
 				{#if o.onward_id}
 					<p class="note"><a href="/books/{o.onward_id}">You gave this book onward. See its journey.</a></p>
 				{:else}
-					<form method="post" action="?/onward">
+					<form method="post" action="?/onward" use:once>
 						<h2>Give it onward</h2>
 						<p>Finished? Relist this copy and its journey carries on.</p>
 						<fieldset>
@@ -207,8 +220,8 @@
 						</fieldset>
 						<label>
 							A note to the next reader
-							<small>Optional, up to 280 characters.</small>
-							<textarea name="note" maxlength="280"></textarea>
+							<small>Optional, up to 280 characters. The next reader sees it once you accept their order.</small>
+							<textarea name="note" maxlength="280" defaultValue={form?.onward_note ?? ''}></textarea>
 						</label>
 						<button class="btn">Give it onward</button>
 					</form>
@@ -219,14 +232,14 @@
 				<details>
 					<summary>Report this message</summary>
 					<form method="post" action="?/report">
-						<label>What is wrong? <textarea name="reason" maxlength="500" required></textarea></label>
+						<label>What is wrong? <textarea name="reason" maxlength="500" required defaultValue={form?.report_reason ?? ''}></textarea></label>
 						<button class="btn">Send report</button>
 					</form>
 				</details>
 			{/if}
 
 			{#if data.testControls && courier && (o.status === 'pickup_booked' || o.status === 'in_transit')}
-				<form class="sheet" method="post" action="?/testcourier">
+				<form class="sheet" method="post" action="?/testcourier" use:once>
 					<p class="typed">Test mode, no money moves. Pretend to be the courier:</p>
 					<div class="actions">
 						{#if o.status === 'pickup_booked'}<button class="btn" name="kind" value="picked_up">Picked up</button>{/if}
@@ -236,8 +249,8 @@
 				</form>
 			{/if}
 
-			{#if (!giver && (o.status === 'requested' || o.status === 'paid')) || (o.status === 'pickup_booked' && !courier)}
-				<form method="post" action="?/cancel"><button class="btn quiet">Cancel order</button></form>
+			{#if canCancel}
+				<form method="post" action="?/cancel" use:once><button class="btn quiet">Cancel order</button></form>
 			{/if}
 		</div>
 
@@ -245,7 +258,9 @@
 			<div class="slip due">
 				<p class="slip-title">{courier ? 'By courier' : 'Handover'} · with {other}</p>
 				{#if !giver}
-					<p class="total">Fee {rupees(o.fee_paise ?? 0)}{#if courier} + courier {rupees(o.courier_paise ?? 0)}{/if} = {rupees(o.total_paise ?? 0)}</p>
+					<p class="total">
+						{#if courier}{rupees(o.fee_paise ?? 0)} fee + {rupees(o.courier_paise ?? 0)} courier = {rupees(o.total_paise ?? 0)}{:else}{rupees(o.total_paise ?? 0)} fee{/if}
+					</p>
 				{/if}
 				<ol>
 					{#each path as step, i}

@@ -4,6 +4,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { sql, tx, type Tx } from './db';
 import { applyCapture } from './engine';
 import { courierTestMode } from './courier';
+import { alertAdmins } from './notify';
 
 const API = 'https://api.razorpay.com/v1';
 const RETRY_AFTER_MINUTES = 15;
@@ -25,11 +26,20 @@ export const paymentsTestMode = () => {
 /** Runs at server start. A production build must never fall into test mode by accident. */
 export function assertConfig(production: boolean) {
 	const { id, secret, webhook } = env();
+	const { SHIPROCKET_EMAIL: email, SHIPROCKET_PASSWORD: password, SHIPROCKET_WEBHOOK_TOKEN: courierToken } = process.env;
 	if ((id || secret || webhook) && paymentsTestMode())
 		throw new Error('Set all of RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET, or none.');
+	if ((email || password) && courierTestMode())
+		throw new Error('Set both SHIPROCKET_EMAIL and SHIPROCKET_PASSWORD, or neither.');
+	// Half-live means real money with no shipment, or a real courier with no money.
+	if (paymentsTestMode() !== courierTestMode())
+		throw new Error('Refusing to start with mixed modes: payments and courier must both be live or both be test.');
+	if (!courierTestMode() && !courierToken)
+		throw new Error('SHIPROCKET_WEBHOOK_TOKEN is required with courier keys.');
 	if (!production) return;
+	if (!process.env.ORIGIN) throw new Error('ORIGIN is required in production.');
 	if (!process.env.SUB_HASH_SALT) throw new Error('SUB_HASH_SALT is required in production.');
-	if ((paymentsTestMode() || courierTestMode()) && process.env.ALLOW_TEST_PAYMENTS !== '1')
+	if (paymentsTestMode() && process.env.ALLOW_TEST_PAYMENTS !== '1')
 		throw new Error('Refusing to start in test mode. Set the Razorpay and Shiprocket keys, or ALLOW_TEST_PAYMENTS=1.');
 }
 
@@ -41,7 +51,16 @@ export async function createGatewayOrder(orderId: string, amountPaise: number): 
 	const res = await fetch(`${API}/orders`, {
 		method: 'POST',
 		headers: { authorization: auth(), 'content-type': 'application/json' },
-		body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt: orderId.slice(0, 40) }),
+		body: JSON.stringify({
+			amount: amountPaise,
+			currency: 'INR',
+			receipt: orderId.slice(0, 40),
+			// The webhook confirms on capture, so a payment must never wait for a manual capture.
+			payment: {
+				capture: 'automatic',
+				capture_options: { automatic_expiry_period: 30, manual_expiry_period: 30, refund_speed: 'normal' }
+			}
+		}),
 		signal: AbortSignal.timeout(8000)
 	});
 	if (!res.ok) throw new Error(`Razorpay orders ${res.status}`);
@@ -85,6 +104,7 @@ export async function handleWebhook(raw: string, signature: string | null, event
 		} else if (kind === 'refund.processed' || kind === 'refund.failed') {
 			const r = event.payload?.refund?.entity;
 			const status = kind === 'refund.processed' ? 'processed' : 'failed';
+			if (kind === 'refund.failed') void alertAdmins('Refund failed', `Payment ${String(r?.payment_id)}`);
 			if (r) await t`UPDATE refunds SET status = ${status}, provider_refund_id = COALESCE(provider_refund_id, ${String(r.id)})
 				WHERE payment_id = ${String(r.payment_id)} AND status <> 'processed'`;
 		}
@@ -145,7 +165,16 @@ async function sendRefund(id: string) {
 		console.error('[refund]', r.id, e);
 		const next = r.attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
 		await sql`UPDATE refunds SET status = ${next} WHERE id = ${r.id} AND status = 'processing'`;
+		if (next === 'failed') void alertAdmins('Refund failed', `Refund ${r.id} gave up after ${MAX_ATTEMPTS} attempts.`);
 	}
+}
+
+/** An admin's second chance. The idempotency key stays the same, so it cannot pay twice. */
+export async function retryRefund(id: string) {
+	const rows = await sql`UPDATE refunds SET status = 'pending', attempts = 0
+		WHERE id = ${id} AND status = 'failed' RETURNING order_id`;
+	if (rows.length) await flushRefunds(rows[0].order_id);
+	return rows.length > 0;
 }
 
 /** After commit, for one order or (from sweep) everything outstanding. Never throws at the user. */

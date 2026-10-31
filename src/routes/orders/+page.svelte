@@ -30,7 +30,7 @@
 					<a href="/orders/{o.id}">
 						<span class="row-main">
 							<b>{o.title}</b>
-							<span class="typed">{o.mine ? 'Your book' : 'You requested'}, {o.method === 'post' ? 'by courier' : 'handover'}</span>
+							<span class="typed">{o.mine ? 'You gave this' : 'You ordered this'}, {o.method === 'post' ? 'by courier' : 'handover'}</span>
 						</span>
 						<span class="tag" class:hot={yourMove(o)}>{yourMove(o) ? 'Your move' : ORDER_STATUS[o.status]}</span>
 						<Icon name="arrow" />

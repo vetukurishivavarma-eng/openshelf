@@ -2,8 +2,13 @@
 const API = 'https://apiv2.shiprocket.in/v1/external';
 const WEIGHT_KG = 0.5; // ponytail: flat parcel size; ask the giver for weight when thick books misquote.
 const DIMENSION_CM = 25;
+// Any of these means the book has left the giver.
+export const MOVED = /PICKED UP|IN TRANSIT|OUT FOR DELIVERY|SHIPPED|DELIVERED/;
 
 export const courierTestMode = () => !(process.env.SHIPROCKET_EMAIL && process.env.SHIPROCKET_PASSWORD);
+
+/** The courier accepted part of a booking and it could not be undone. A person must look. */
+export class CourierStuck extends Error {}
 
 let token: { value: string; expires: number } | null = null;
 
@@ -49,9 +54,23 @@ export type Pickup = {
 	reader: { name: string; phone: string; address: string; city: string; pincode: string };
 };
 
-/** Returns the shipment id. Throws when the booking fails; the caller treats that as a failed pickup. */
-export async function bookPickup(p: Pickup): Promise<string> {
-	if (courierTestMode()) return `test_ship_${p.orderId}`;
+/** True when the courier says the book has left. Throws if the courier cannot say. */
+export async function shipmentMoved(shipmentId: string) {
+	const data = await call(`/courier/track/shipment/${shipmentId}`);
+	const track = data.tracking_data?.shipment_track?.[0];
+	return MOVED.test(String(track?.current_status ?? '').toUpperCase());
+}
+
+/** Throws unless the courier confirms. A caller must not refund after a throw. */
+export async function cancelShipment(courierOrderId: string) {
+	await call('/orders/cancel', { method: 'POST', body: JSON.stringify({ ids: [courierOrderId] }) });
+}
+
+/** A test order never reaches the courier, whatever keys are set by the time it is accepted. */
+export async function bookPickup(p: Pickup, testOrder: boolean) {
+	if (testOrder || courierTestMode())
+		return { shipmentId: `test_ship_${p.orderId}`, courierOrderId: `test_courier_${p.orderId}` };
+
 	const location = `giver-${p.orderId}`.slice(0, 36);
 	await call('/settings/company/addpickup', {
 		method: 'POST',
@@ -92,8 +111,17 @@ export async function bookPickup(p: Pickup): Promise<string> {
 			weight: WEIGHT_KG
 		})
 	});
-	const shipment = String(order.shipment_id);
-	await call('/courier/assign/awb', { method: 'POST', body: JSON.stringify({ shipment_id: shipment }) });
-	await call('/courier/generate/pickup', { method: 'POST', body: JSON.stringify({ shipment_id: [shipment] }) });
-	return shipment;
+	const shipmentId = String(order.shipment_id);
+	const courierOrderId = String(order.order_id);
+	try {
+		await call('/courier/assign/awb', { method: 'POST', body: JSON.stringify({ shipment_id: shipmentId }) });
+		await call('/courier/generate/pickup', { method: 'POST', body: JSON.stringify({ shipment_id: [shipmentId] }) });
+	} catch (e) {
+		// A half-made booking must be undone before a refund is safe.
+		await cancelShipment(courierOrderId).catch(() => {
+			throw new CourierStuck(`Booking ${courierOrderId} failed halfway: ${e}`);
+		});
+		throw e;
+	}
+	return { shipmentId, courierOrderId };
 }

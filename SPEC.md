@@ -28,12 +28,22 @@ Audience: college students, working professionals, avid readers.
 - Refund the full amount, exactly once, if the giver doesn't respond in 72h, pickup fails, or a dispute is upheld.
 - States: requested -> paid -> pickup_booked -> in_transit -> delivered -> received, plus declined, cancelled,
   expired, disputed, refunded. A local handover skips the courier and in_transit.
+- Handover is offered only when reader and giver are in the same normalised city. Once accepted, only the giver
+  can cancel (full refund); the reader's route is a dispute; a timed-out accepted handover goes to dispute.
+- Courier: cancel the shipment before any refund after booking. If that fails, or the courier says the book has
+  moved, do not refund: send it to disputed for an admin. Query courier status before a timeout refund. Account
+  deletion is blocked while a courier order is at pickup_booked or moving; a ban sends those to an admin.
+- Payments and courier are both live or both test; mixed modes refuse to start. A test order never books a real
+  courier, and open test orders are cancelled at live startup. Live courier keys require the webhook token.
+- Forms carry a request token, so a repeat submit lands on the original result. Order actions redirect after POST.
 - All state changes in one transaction with row locks. Status transitions are guarded in SQL
   (`UPDATE ... WHERE status = expected`), so concurrency and double-clicks are safe.
 - A listing can have only one open order (partial unique index). You cannot order your own book.
-- Anti-reseller: max 3 orders per user per calendar month, enforced race-safely.
-- Timers: an idempotent `sweep()` run hourly from setInterval in the server, guarded by a Postgres advisory
-  lock, and also tested directly.
+- Anti-reseller: max 3 orders per user per calendar month, enforced race-safely. An accepted handover always
+  counts. The count survives delete and return through deleted_sub_hash. This is a speed bump, not a wall: a
+  second Google account gets a fresh allowance, and WhatsApp numbers are unverified.
+- Timers: an idempotent `sweep()` run every 5 minutes from setInterval in the server, guarded by a Postgres advisory
+  lock, and also tested directly. Deadlines are also rechecked in the pay, accept and confirm actions.
 
 ## Book journey
 The giver writes a short note to the next reader; the reader sends a thank-you back. Both are plain text,
@@ -69,12 +79,15 @@ Profile (city, pincode, WhatsApp) is required before listing or requesting. What
 unique across users, normalised to +91 and 10 digits.
 
 ## Privacy and safety
-Public pages show the book, its condition and city. Never a name, pincode, email, or WhatsApp.
-The WhatsApp deep link is visible only to the two parties, only once the giver accepts.
-Addresses live on the order and are wiped when it reaches a terminal state.
-Report button on listings, users, notes and thank-yous. Ban blocks sign-in and hides listings; orders that
-have not left the giver are refunded. Account delete: anonymises the user, removes listings, refunds those
-same orders, and keeps a salted hash of the Google sub so that a ban on the account still holds.
+Public pages show the book, its condition and a normalised city. Never a name, pincode, email, or WhatsApp.
+The giver's first name and note reach the reader only once the giver accepts. The WhatsApp deep link is visible
+only to the two parties, only once the giver accepts, and stops 7 days after a terminal state.
+Addresses and pincodes live on the order and are wiped when it reaches a terminal state. The pickup pincode is
+snapshotted at quote time.
+Report button on listings, users, notes and thank-yous. Ban blocks sign-in and hides listings, including a listing in an order, which stays visible
+to the order's two parties. Orders the giver has not accepted are refunded; accepted ones go to an admin. Account
+delete: anonymises the user, removes listings, refunds those same orders, and keeps a salted hash of the Google
+sub so that a ban and the monthly cap still hold. Banned users can erase their data through Google sign-in.
 Terms must ban pirated copies and photocopies. Privacy page covers India's DPDP Act basics and names the
 payment and courier processors.
 Rate limit sign-in, requests and listing creation (in-memory token bucket is fine, mark with a

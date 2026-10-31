@@ -77,7 +77,7 @@
 		<h2 id="fair">A book that remembers where it has been</h2>
 		<p>
 			Every book shows how many readers it has had and the cities it has passed through. Never a name.
-			Your number stays private until an order is confirmed, and a limit of three
+			Your number stays private until the giver accepts an order, and a limit of three
 			orders a month keeps resellers out.
 		</p>
 	</div>

@@ -1,3 +1,20 @@
+const CITY_ALIASES: Record<string, string> = {
+	bangalore: 'Bengaluru', bengaluru: 'Bengaluru', bombay: 'Mumbai', calcutta: 'Kolkata', madras: 'Chennai',
+	gurgaon: 'Gurugram', vizag: 'Visakhapatnam', trivandrum: 'Thiruvananthapuram', cochin: 'Kochi', poona: 'Pune'
+};
+
+/**
+ * One spelling per city, because cities are compared and shown publicly. Letters only, so this
+ * public field cannot carry a phone number or a link. ponytail: not a list of real places;
+ * use one if someone writes words in it.
+ */
+export function city(value: FormDataEntryValue | null): string | null {
+	if (typeof value !== 'string') return null;
+	const s = value.replace(/\s+/g, ' ').trim().toLowerCase();
+	if (s.length < 2 || s.length > 40 || s.split(' ').length > 4 || !/^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u.test(s)) return null;
+	return CITY_ALIASES[s] ?? s.replace(/(^|[ -])(\p{L})/gu, (m) => m.toUpperCase());
+}
+
 export const NOTE_MAX = 280;
 
 /** Trimmed single-line text, or null if empty or over max. */

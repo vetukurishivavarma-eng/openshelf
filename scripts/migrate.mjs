@@ -9,6 +9,8 @@ const dir = new URL('../migrations/', import.meta.url);
 export async function migrate(url) {
 	const sql = postgres(url, { max: 1, onnotice: () => {} });
 	try {
+		const [{ server_encoding: encoding }] = await sql`SHOW server_encoding`;
+		if (encoding !== 'UTF8') throw new Error(`Database encoding is ${encoding}; readers write in Hindi and Telugu, so it must be UTF8.`);
 		await sql`SELECT pg_advisory_lock(727001)`;
 		await sql`CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
 		const done = new Set((await sql`SELECT name FROM schema_migrations`).map((r) => r.name));

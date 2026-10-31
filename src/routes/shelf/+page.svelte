@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { BRAND } from '$lib/brand';
+	import Alert from '$lib/ui/Alert.svelte';
 	import { fmtDate } from '$lib/labels';
 	import Empty from '$lib/ui/Empty.svelte';
 	import Icon from '$lib/ui/Icon.svelte';
@@ -19,7 +20,7 @@
 		<a class="btn primary" href="/list"><Icon name="plus" />Give a book</a>
 	</div>
 
-	{#if form?.error}<p class="alert" role="alert"><Icon name="alert" />{form.error}</p>{/if}
+	{#if form?.error}<Alert message={form.error} />{/if}
 
 	{#if data.books.length === 0}
 		<Empty icon="shelf" title="Your shelf is empty">

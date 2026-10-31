@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { sql } from '$lib/server/db';
 import { banUser, resolveDispute } from '$lib/server/engine';
+import { retryRefund } from '$lib/server/payments';
 import { attempt, signedIn } from '$lib/server/form';
 import { UUID } from '$lib/server/validate';
 
@@ -24,7 +25,7 @@ export const load = async ({ locals }) => {
 		JOIN users o ON o.id = s.giver_id JOIN users r ON r.id = s.reader_id
 		WHERE s.status = 'disputed' ORDER BY s.status_at`;
 	const reports = await sql`
-		SELECT rp.id, rp.reason, rp.created_at, rp.listing_id, rp.subject, l.title,
+		SELECT rp.id, rp.reason, rp.created_at, rp.listing_id, rp.subject, l.title, l.status AS listing_status,
 			CASE rp.subject WHEN 'note' THEN l.note WHEN 'thank_you' THEN o.thank_you END AS message,
 			COALESCE(rp.user_id, l.giver_id) AS target_id,
 			split_part(t.name, ' ', 1) AS target_name, t.banned_at IS NOT NULL AS banned
@@ -55,6 +56,13 @@ export const actions = {
 		admin(locals);
 		const id = uuid(await request.formData(), 'id');
 		await sql`UPDATE reports SET resolved_at = now() WHERE id = ${id}`;
+		return { ok: true };
+	},
+
+	retry: async ({ request, locals }) => {
+		admin(locals);
+		const id = uuid(await request.formData(), 'id');
+		if (!(await retryRefund(id))) return fail(400, { error: 'Only a failed refund can be retried.' });
 		return { ok: true };
 	},
 

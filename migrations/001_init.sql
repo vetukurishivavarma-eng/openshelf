@@ -36,9 +36,11 @@ CREATE TABLE listings (
 	-- One physical copy keeps one journey across every reader.
 	journey_id uuid NOT NULL DEFAULT gen_random_uuid(),
 	onward_from uuid UNIQUE,
+	request_token uuid,
 	created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ON listings (giver_id);
+CREATE UNIQUE INDEX listings_once ON listings (giver_id, request_token);
 CREATE INDEX ON listings (status, created_at DESC);
 CREATE INDEX ON listings (journey_id);
 CREATE INDEX listings_search ON listings USING gin ((title || ' ' || author) gin_trgm_ops);
@@ -53,6 +55,9 @@ CREATE TABLE orders (
 		'requested', 'paid', 'pickup_booked', 'in_transit', 'delivered', 'disputed',
 		'declined', 'cancelled', 'expired', 'received', 'refunded')),
 	status_at timestamptz NOT NULL DEFAULT now(),
+	accepted_at timestamptz,
+	disputed_from text,
+	request_token uuid,
 	fee_paise integer NOT NULL CHECK (fee_paise >= 0),
 	courier_paise integer NOT NULL CHECK (courier_paise >= 0),
 	total_paise integer GENERATED ALWAYS AS (fee_paise + courier_paise) STORED,
@@ -62,7 +67,10 @@ CREATE TABLE orders (
 	address text,
 	delivery_pincode text,
 	pickup_address text,
+	-- Snapshot at quote time: the giver editing their profile must not change a paid route.
+	pickup_pincode text,
 	shipment_id text UNIQUE,
+	courier_order_id text,
 	dispute_note text,
 	thank_you text CHECK (char_length(thank_you) <= 280),
 	thanked_at timestamptz,
@@ -70,12 +78,13 @@ CREATE TABLE orders (
 	created_at timestamptz NOT NULL DEFAULT now(),
 	CHECK (giver_id <> reader_id),
 	CONSTRAINT orders_address_wiped CHECK (
-		(address IS NULL AND pickup_address IS NULL)
+		(address IS NULL AND pickup_address IS NULL AND delivery_pincode IS NULL AND pickup_pincode IS NULL)
 		OR status IN ('requested', 'paid', 'pickup_booked', 'in_transit', 'delivered', 'disputed'))
 );
 CREATE UNIQUE INDEX orders_one_open ON orders (listing_id)
 	WHERE status IN ('requested', 'paid', 'pickup_booked', 'in_transit', 'delivered', 'disputed');
 CREATE INDEX ON orders (reader_id, created_at);
+CREATE UNIQUE INDEX orders_once ON orders (reader_id, request_token);
 CREATE INDEX ON orders (giver_id);
 CREATE INDEX ON orders (status, status_at);
 

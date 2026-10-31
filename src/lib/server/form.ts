@@ -1,14 +1,18 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { OrderError } from './engine';
 
-/** Turns a OrderError into a form error; anything else stays a real failure. */
-export async function attempt(fn: () => Promise<unknown>) {
+/**
+ * Turns an OrderError into a form error that keeps what the user typed. A repeat of something
+ * that already happened is not an error: it goes to `doneAt`, the page showing the result.
+ */
+export async function attempt<V extends object = object>(fn: () => Promise<unknown>, values?: V, doneAt?: string) {
 	try {
 		await fn();
 		return null;
 	} catch (e) {
-		if (e instanceof OrderError) return fail(400, { error: e.message });
-		throw e;
+		if (!(e instanceof OrderError)) throw e;
+		if (e.stale && doneAt) redirect(303, doneAt);
+		return fail(400, { error: e.message, ...(values as V) });
 	}
 }
 

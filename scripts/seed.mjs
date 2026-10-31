@@ -35,7 +35,7 @@ const books = [
 const sql = postgres(url, { max: 1, onnotice: () => {} });
 const [{ n }] = await sql`SELECT count(*)::int AS n FROM users WHERE google_sub LIKE 'dev:%@dev.local'`;
 if (n) {
-	console.log('Already seeded.');
+	console.log('Already seeded. To start again, stop `npm run db` and delete .pgdata.');
 	await sql.end();
 	process.exit(0);
 }

@@ -27,15 +27,15 @@
 		<li>A platform fee of {fee} on every order. It pays for running {BRAND.name}, not for the book.</li>
 		<li>The courier charge for that order, quoted before you pay. A local handover has no courier charge.</li>
 		<li>Payments are handled by Razorpay. We never see your card or UPI details.</li>
-		<li>You can place up to 3 orders per calendar month. Refunded and cancelled orders do not count.</li>
+		<li>You can place up to 3 orders per calendar month. Refunded and cancelled orders do not count, except an accepted handover, which always counts.</li>
 	</ul>
 
 	<h2>Refunds</h2>
 	<p>You get the full amount back, fee and courier charge, if:</p>
 	<ul>
 		<li>the giver does not respond within 72 hours, or declines;</li>
-		<li>the pickup fails, or the book is not collected within 5 days;</li>
-		<li>you cancel before the giver accepts;</li>
+		<li>the pickup fails and the courier confirms it has stopped;</li>
+		<li>you cancel before the giver accepts, or the giver cancels an agreed handover;</li>
 		<li>a dispute is upheld.</li>
 	</ul>
 	<p>Refunds go back to the original payment method. Your bank may take a few days to show them.</p>
@@ -44,7 +44,8 @@
 	<ul>
 		<li>Unpaid orders hold a book for 30 minutes. Payment makes the reservation final.</li>
 		<li>A courier partner collects from the giver and delivers to the reader. Please keep the book ready and packed.</li>
-		<li>For a local handover, meet somewhere public. Readers arrange it between themselves.</li>
+		<li>Local handover is for readers in the same city as the giver. Meet somewhere public. Once it is agreed, a problem goes through a dispute; a reader cannot cancel it. If it does not happen within 5 days, an admin reviews the order.</li>
+		<li>If a courier may still have the book, or a cancellation fails, an admin decides before any refund.</li>
 		<li>An order confirms itself 14 days after delivery unless the reader raises a dispute.</li>
 		<li>An admin decides disputes. The decision is final on the platform.</li>
 	</ul>
@@ -59,6 +60,6 @@
 	<p>
 		Be honest about a book’s condition and use contact details only to complete an order. Reselling books
 		from {BRAND.name} is not allowed. We may ban accounts that abuse the service. Banning hides listings
-		and refunds orders that have not left the giver.
+		and refunds orders the giver has not accepted. Accepted orders go to an admin.
 	</p>
 </div>

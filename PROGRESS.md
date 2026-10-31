@@ -20,13 +20,20 @@ Done:
 
 5. QA done: docs/qa-report.md. Screens retaken in docs/screens.
 
-In progress:
-6. Lead developer fixing every finding in docs/security-report.md and docs/qa-report.md. Check with
-   `git log` and `npm test` how far it got; findings are not fixed unless the tests prove it.
+6. MILESTONE 2026-11-01: all High and money/privacy Medium findings fixed. Product owner re-ran it: check 0
+   errors, 446 tests pass, build passes. Exploits for H1-H3 and browser checks for QA Highs were run by the
+   developer, not re-run independently. docs/security-report.md, docs/qa-report.md and docs/screens predate these
+   fixes (their "OPEN" status is stale). Dev DB must be recreated: schema changed and UTF8 is now required.
+
+Partly open: M5 (is True-Client-IP safe on Render?), L1 (real fix needs phone verification), L4 (salt must never
+rotate), L12 (visual change not viewed). L2 and log-out-everywhere have no tests.
 
 To do:
-7. Final verification by the product owner, retest of the High items.
-8. Real-service testing, which needs the owner's accounts.
+7. Retake screenshots and view the order pages in a browser once usage allows.
+8. Real-service testing, needs the owner's accounts: Razorpay sandbox (CSP hosts, inline styles, auto-capture),
+   Shiprocket (API cancel may fail after AWB, sending every timeout to admin), Google, Resend, Render, a real phone.
+9. Legal review of /terms and /privacy; add operator and grievance contact.
+10. Final name and domain.
 
 Needed from the owner: Razorpay and Shiprocket/Delhivery accounts (own KYC), Google OAuth client, a durable
 database for launch, a final name and domain.

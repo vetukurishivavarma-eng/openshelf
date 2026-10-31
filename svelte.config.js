@@ -14,9 +14,11 @@ export default {
 				'script-src': ['self', 'https://checkout.razorpay.com'],
 				'frame-src': ['https://api.razorpay.com', 'https://checkout.razorpay.com'],
 				'style-src': ['self'],
+				// Kit's route announcer, by hash, so no inline style is allowed in general.
+				'style-src-attr': ['unsafe-hashes', 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='],
 				'font-src': ['self'],
 				'img-src': ['self', ...covers],
-				'connect-src': ['self'],
+				'connect-src': ['self', 'https://api.razorpay.com'],
 				'manifest-src': ['self'],
 				'worker-src': ['self'],
 				'base-uri': ['self'],

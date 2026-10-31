@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
-import { startSession, upsertGoogleUser } from '$lib/server/auth';
+import { dev } from '$app/environment';
+import { bannedAccount, startSession, upsertGoogleUser } from '$lib/server/auth';
 
 export const GET = async ({ url, cookies }) => {
 	const state = cookies.get('oauth_state');
@@ -31,7 +32,12 @@ export const GET = async ({ url, cookies }) => {
 		error(400, 'Google did not confirm this account.');
 
 	const userId = await upsertGoogleUser(claims.sub, claims.email, claims.name ?? claims.email.split('@')[0]);
-	if (!userId) error(403, 'This account has been banned.');
+	if (!userId) {
+		const erase = await bannedAccount(claims.sub);
+		if (!erase) error(403, 'This account has been banned.');
+		cookies.set('erase', erase, { path: '/erase', httpOnly: true, secure: !dev, sameSite: 'lax', maxAge: 900 });
+		redirect(303, '/erase');
+	}
 	await startSession(cookies, userId);
 	redirect(303, '/books');
 };

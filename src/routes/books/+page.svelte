@@ -22,10 +22,10 @@
 	<h1>Browse books</h1>
 
 	<form class="filters" method="get" role="search">
-		<label class="grow">Title or author <input type="search" name="q" value={data.filters.q ?? ''} /></label>
+		<label class="grow">Title or author <input type="search" name="q" defaultValue={data.filters.q ?? ''} /></label>
 		<label>
 			City
-			<input name="city" list="cities" value={data.filters.city ?? ''} />
+			<input name="city" list="cities" defaultValue={data.filters.city ?? ''} />
 			<datalist id="cities">
 				{#each data.cities as city}<option value={city}></option>{/each}
 			</datalist>
@@ -41,7 +41,11 @@
 	</form>
 
 	{#if data.books.length === 0}
-		{#if filtered}
+		{#if data.page > 1}
+			<Empty icon="search" title="No more books">
+				<a class="btn" href="/books">Back to the first page</a>
+			</Empty>
+		{:else if filtered}
 			<Empty icon="search" title="Nothing matches yet">
 				<p>
 					{#if data.filters.city}No match in {data.filters.city} so far. Give a book and be among the first readers there.

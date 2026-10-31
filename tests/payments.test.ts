@@ -13,7 +13,7 @@ import {
 } from './helpers';
 
 const SECRET = 'whsec_test_only';
-const KEYS = ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'SHIPROCKET_EMAIL', 'SHIPROCKET_PASSWORD', 'ALLOW_TEST_PAYMENTS', 'SUB_HASH_SALT', 'SHIPROCKET_WEBHOOK_TOKEN'];
+const KEYS = ['ORIGIN', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'SHIPROCKET_EMAIL', 'SHIPROCKET_PASSWORD', 'ALLOW_TEST_PAYMENTS', 'SUB_HASH_SALT', 'SHIPROCKET_WEBHOOK_TOKEN'];
 
 type Call = { url: string; init: RequestInit & { headers: Record<string, string> } };
 let calls: Call[] = [];
@@ -338,18 +338,50 @@ describe('test mode', () => {
 		expect(paymentsTestMode()).toBe(false);
 	});
 
-	it('production refuses to start in test mode', () => {
+	const production = () => {
 		process.env.SUB_HASH_SALT = 's';
-		expect(() => assertConfig(true)).toThrow('Refusing to start in test mode');
-		goLive();
-		expect(() => assertConfig(true)).toThrow('Refusing to start in test mode'); // Courier still test.
+		process.env.ORIGIN = 'https://x.test';
+	};
+	const courierKeys = () => {
 		process.env.SHIPROCKET_EMAIL = 'e';
 		process.env.SHIPROCKET_PASSWORD = 'p';
+		process.env.SHIPROCKET_WEBHOOK_TOKEN = 't';
+	};
+
+	it('production refuses to start in test mode', () => {
+		production();
+		expect(() => assertConfig(true)).toThrow('Refusing to start in test mode');
+		goLive();
+		courierKeys();
 		expect(() => assertConfig(true)).not.toThrow();
 	});
 
+	it('mixed modes are refused outright, even with ALLOW_TEST_PAYMENTS, in development too', () => {
+		production();
+		process.env.ALLOW_TEST_PAYMENTS = '1';
+		goLive();
+		expect(() => assertConfig(true)).toThrow('mixed modes');
+		expect(() => assertConfig(false)).toThrow('mixed modes');
+		for (const k of ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET']) delete process.env[k];
+		courierKeys();
+		expect(() => assertConfig(true)).toThrow('mixed modes');
+	});
+
+	it('courier keys need the webhook token', () => {
+		production();
+		goLive();
+		courierKeys();
+		delete process.env.SHIPROCKET_WEBHOOK_TOKEN;
+		expect(() => assertConfig(true)).toThrow('SHIPROCKET_WEBHOOK_TOKEN');
+	});
+
+	it('half-set courier keys are refused', () => {
+		process.env.SHIPROCKET_EMAIL = 'e';
+		expect(() => assertConfig(false)).toThrow('or neither');
+	});
+
 	it('ALLOW_TEST_PAYMENTS=1 is the only override, and development is exempt', () => {
-		process.env.SUB_HASH_SALT = 's';
+		production();
 		process.env.ALLOW_TEST_PAYMENTS = 'true';
 		expect(() => assertConfig(true)).toThrow();
 		process.env.ALLOW_TEST_PAYMENTS = '1';
@@ -358,12 +390,16 @@ describe('test mode', () => {
 		expect(() => assertConfig(false)).not.toThrow();
 	});
 
-	it('half-set keys are refused everywhere; production needs the salt', () => {
+	it('half-set keys are refused everywhere; production needs the salt and ORIGIN', () => {
 		process.env.RAZORPAY_KEY_ID = 'k';
 		expect(() => assertConfig(false)).toThrow('or none');
 		delete process.env.RAZORPAY_KEY_ID;
 		process.env.ALLOW_TEST_PAYMENTS = '1';
+		process.env.ORIGIN = 'https://x.test';
 		expect(() => assertConfig(true)).toThrow('SUB_HASH_SALT');
+		delete process.env.ORIGIN;
+		process.env.SUB_HASH_SALT = 's';
+		expect(() => assertConfig(true)).toThrow('ORIGIN');
 	});
 
 	it('a webhook cannot be forged with a guessable test secret', async () => {
@@ -412,9 +448,9 @@ describe('courier, Shiprocket shape', () => {
 	});
 
 	it('books in order: pickup location, order, AWB, pickup', async () => {
-		const seen = live({ addpickup: {}, 'orders/create': { shipment_id: 77 }, 'assign/awb': {}, 'generate/pickup': {} });
+		const seen = live({ addpickup: {}, 'orders/create': { shipment_id: 77, order_id: 78 }, 'assign/awb': {}, 'generate/pickup': {} });
 		const person = { name: 'N', phone: '+919000000000', address: 'A', city: 'C', pincode: '411001' };
-		expect(await bookPickup({ orderId: 'o1', title: 'T', giver: person, reader: person })).toBe('77');
+		expect(await bookPickup({ orderId: 'o1', title: 'T', giver: person, reader: person }, false)).toEqual({ shipmentId: '77', courierOrderId: '78' });
 		expect(seen.filter((u) => !u.includes('login')).map((u) => u.split('/external')[1])).toEqual([
 			'/settings/company/addpickup', '/orders/create/adhoc', '/courier/assign/awb', '/courier/generate/pickup'
 		]);
@@ -422,6 +458,7 @@ describe('courier, Shiprocket shape', () => {
 
 	it('a booking failure is a pickup failure: refunded in full', async () => {
 		const s = await orderAt('paid');
+		await sql`UPDATE orders SET test_mode = false WHERE id = ${s.id}`;
 		live({});
 		await acceptOrder(s.giver, s.id, PICKUP);
 		expect(await status(s.id)).toBe('refunded');

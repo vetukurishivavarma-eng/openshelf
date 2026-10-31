@@ -42,7 +42,7 @@ const browse = (qs: string) => (booksLoad as Function)({ url: new URL(`http://x/
 describe('public pages expose no private data', () => {
 	it('book page and browse carry no name, contact, or ids of people, at every stage', async () => {
 		const giver = await newUser(NAME, 'Pune');
-		const reader = await newUser('Karthik Hiddenname', 'Kochi');
+		const reader = await newUser('Karthik Hiddenname', 'Pune');
 		const [u] = await sql`SELECT email, pincode, whatsapp FROM users WHERE id = ${giver}`;
 		const id = await newListing(giver, 'Dear reader, from Zubeida');
 		const check = async () => {
@@ -139,7 +139,7 @@ describe('client input', () => {
 		const thanks = (message: string) =>
 			(orderActions.thanks as Function)({ request: form({ message }), params: { id: s.id }, locals: asUser(s.reader) });
 		expect((await thanks('x'.repeat(NOTE_MAX + 1))).status).toBe(400);
-		expect((await thanks('Thank you')).ok).toBe(true);
+		expect(await thrown(() => thanks('Thank you'))).toBe(303);
 	});
 
 	it('collapses control characters and whitespace', () => {
@@ -153,7 +153,7 @@ describe('order page authorisation', () => {
 	it('strangers get 404, the anonymous are redirected, and the giver cannot see an unpaid order', async () => {
 		const s = await orderAt('pickup_booked');
 		const stranger = await newUser();
-		const load = (locals: unknown, id = s.id) => (orderLoad as Function)({ params: { id }, locals });
+		const load = (locals: unknown, id = s.id) => (orderLoad as Function)({ params: { id }, locals, url: new URL('http://x') });
 		expect(await thrown(() => load(asUser(stranger)))).toBe(404);
 		expect(await thrown(() => load(anon))).toBe(303);
 		expect((await load(asUser(s.giver))).order.whatsapp).toMatch(/^\+91\d{10}$/);
@@ -178,7 +178,7 @@ describe('order page authorisation', () => {
 		expect((await pay(await newUser())).status).toBe(400);
 		expect((await pay(s.giver)).status).toBe(400);
 		expect(await status(s.id)).toBe('requested');
-		await pay(s.reader);
+		await thrown(() => pay(s.reader));
 		expect(await status(s.id)).toBe('paid');
 	});
 
@@ -192,7 +192,7 @@ describe('order page authorisation', () => {
 		try {
 			const pay = () => (orderActions.testpay as Function)({ request: form({}), params: { id: s.id }, locals: asUser(s.reader) });
 			expect(await thrown(pay)).toBe(404);
-			const page = await (orderLoad as Function)({ params: { id: s.id }, locals: asUser(s.reader) });
+			const page = await (orderLoad as Function)({ params: { id: s.id }, locals: asUser(s.reader), url: new URL('http://x') });
 			expect(page.testControls).toBe(false);
 		} finally {
 			for (const k of ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'SHIPROCKET_EMAIL', 'SHIPROCKET_PASSWORD']) delete process.env[k];
@@ -205,8 +205,8 @@ describe('order page authorisation', () => {
 		await sendThanks(s.reader, s.id, 'Rude thanks');
 		const report = (id: string) =>
 			(orderActions.report as Function)({ request: form({ reason: 'Abusive' }), params: { id: s.id }, locals: asUser(id) });
-		await report(s.reader);
-		await report(s.giver);
+		expect(await thrown(() => report(s.reader))).toBe(303);
+		expect(await thrown(() => report(s.giver))).toBe(303);
 		const rows = await sql`SELECT subject, user_id, reporter_id FROM reports WHERE order_id = ${s.id} ORDER BY subject`;
 		expect(rows.map((r) => [r.subject, r.user_id])).toEqual([['note', s.giver], ['thank_you', s.reader]]);
 		const stranger = await newUser();

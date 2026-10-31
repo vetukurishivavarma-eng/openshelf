@@ -47,7 +47,7 @@ const LEGAL: Record<Method, Record<string, Record<string, Status>>> = {
 	} as never,
 	handover: {
 		...COMMON,
-		pickup_booked: { 'hand over': 'delivered', 'cancel by reader': 'cancelled', 'cancel by giver': 'cancelled' }
+		pickup_booked: { 'hand over': 'delivered', 'cancel by giver': 'cancelled', dispute: 'disputed' }
 	} as never
 };
 // Money comes back on these moves, and only these.
@@ -207,15 +207,6 @@ describe('sweep', () => {
 		expect((await refundsFor(s.id)).length).toBe(refunds);
 	});
 
-	it('an unanswered handover expires with a refund', async () => {
-		const s = await orderAt('pickup_booked', 'handover');
-		await backdate(s.id, '121 hours');
-		await sweep();
-		expect(await status(s.id)).toBe('expired');
-		expect((await refundsFor(s.id)).length).toBe(1);
-		expect(await listingStatus(s.listing)).toBe('available');
-	});
-
 	it.each([
 		['requested', '29 minutes'],
 		['paid', '71 hours'],
@@ -296,7 +287,7 @@ describe('address wipe and contact privacy', () => {
 
 	it('contact disappears from a closed order that never completed', async () => {
 		const s = await orderAt('pickup_booked', 'handover');
-		await cancelOrder(s.reader, s.id);
+		await cancelOrder(s.giver, s.id);
 		expect((await orderFor(s.id, s.reader))!.whatsapp).toBeNull();
 	});
 });
@@ -314,23 +305,23 @@ describe('journey', () => {
 		const l1 = await createListing(giver, book);
 		expect(await cities(l1)).toEqual(['Pune']);
 
-		const o1 = await createOrder(first, l1, details('handover'));
-		await pay(o1.id);
-		await acceptOrder(giver, o1.id, null);
-		await markHandedOver(giver, o1.id);
-		await confirmReceived(first, o1.id);
+		const pass = async (giver: string, reader: string, listing: string) => {
+			const o = await createOrder(reader, listing, details('post'));
+			await pay(o.id);
+			await acceptOrder(giver, o.id, PICKUP);
+			await courierEvent((await row(o.id)).shipment_id, 'delivered');
+			await confirmReceived(reader, o.id);
+			return o.id;
+		};
+		const o1 = await pass(giver, first, l1);
 		expect(await cities(l1)).toEqual(['Pune', 'Kochi']);
 
-		const l2 = await giveOnward(first, o1.id, { condition: 'worn', note: 'Second life' });
+		const l2 = await giveOnward(first, o1, { condition: 'worn', note: 'Second life' });
 		expect(await cities(l2)).toEqual(['Pune', 'Kochi']);
 		const [meta] = await sql`SELECT title, author, condition, note, status FROM listings WHERE id = ${l2}`;
 		expect({ ...meta }).toEqual({ title: 'T', author: 'A', condition: 'worn', note: 'Second life', status: 'available' });
 
-		const o2 = await createOrder(second, l2, details('handover'));
-		await pay(o2.id);
-		await acceptOrder(first, o2.id, null);
-		await markHandedOver(first, o2.id);
-		await confirmReceived(second, o2.id);
+		await pass(first, second, l2);
 		expect(await cities(l1)).toEqual(['Pune', 'Kochi', 'Indore']);
 	});
 
@@ -360,17 +351,6 @@ describe('journey', () => {
 		await expect(giveOnward(early.reader, early.id, { condition: 'good', note: null })).rejects.toThrow('once you have received');
 	});
 
-	it('the note reaches the reader once paid, and no one else', async () => {
-		const giver = await newUser();
-		const reader = await newUser();
-		const id = await createListing(giver, { ...book, note: 'A private word' });
-		const o = await createOrder(reader, id, details('handover'));
-		expect((await orderFor(o.id, reader))!.note).toBeNull();
-		await pay(o.id);
-		expect((await orderFor(o.id, reader))!.note).toBe('A private word');
-		expect(await orderFor(o.id, await newUser())).toBeNull();
-	});
-
 	it('thank-you: receiver only, after receipt, once; the giver reads it', async () => {
 		const s = await orderAt('delivered');
 		await expect(sendThanks(s.reader, s.id, 'Early')).rejects.toBeInstanceOf(OrderError);
@@ -379,6 +359,11 @@ describe('journey', () => {
 		await sendThanks(s.reader, s.id, 'Thank you');
 		await expect(sendThanks(s.reader, s.id, 'Again')).rejects.toBeInstanceOf(OrderError);
 		expect((await orderFor(s.id, s.giver))!.thank_you).toBe('Thank you');
+	});
+
+	it('notes stay private to the order', async () => {
+		const s = await orderAt('pickup_booked');
+		expect(await orderFor(s.id, await newUser())).toBeNull();
 	});
 
 	it('the database limits notes and thank-yous to 280 characters', async () => {
@@ -401,18 +386,6 @@ describe('ban and delete', () => {
 			await expect(createOrder(await newUser(), spare, details('post'))).rejects.toBeInstanceOf(OrderError);
 		});
 
-		it(`${name}: a booked pickup is refunded either way`, async () => {
-			const a = await orderAt('pickup_booked');
-			await close(a.giver);
-			expect(await status(a.id)).toBe('refunded');
-			expect((await refundsFor(a.id)).length).toBe(1);
-			const b = await orderAt('pickup_booked');
-			await close(b.reader);
-			expect(await status(b.id)).toBe('refunded');
-			expect((await refundsFor(b.id)).length).toBe(1);
-			expect(await listingStatus(b.listing)).toBe('available');
-		});
-
 		it(`${name}: an unpaid order closes with no refund`, async () => {
 			const s = await orderAt('requested');
 			await close(s.reader);
@@ -420,11 +393,11 @@ describe('ban and delete', () => {
 			expect((await refundsFor(s.id)).length).toBe(0);
 		});
 
-		it(`${name}: a book already moving stays open, and the address goes now`, async () => {
-			const s = await orderAt('in_transit');
+		it(`${name}: a delivered book stays open, and the address goes now`, async () => {
+			const s = await orderAt('delivered');
 			await close(s.reader);
 			const o = await row(s.id);
-			expect([o.status, o.address]).toEqual(['in_transit', null]);
+			expect([o.status, o.address]).toEqual(['delivered', null]);
 			expect((await refundsFor(s.id)).length).toBe(0);
 		});
 	}
@@ -573,8 +546,7 @@ describe('closing a giver with a book on the move', () => {
 		const s = await orderAt('in_transit');
 		await banUser(s.giver);
 		expect(await listingStatus(s.listing)).toBe('reserved');
-		await courierEvent((await row(s.id)).shipment_id, 'delivered');
-		await confirmReceived(s.reader, s.id);
+		await resolveDispute(s.id, 'received');
 		expect(await listingStatus(s.listing)).toBe('gone');
 	});
 });

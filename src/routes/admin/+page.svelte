@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { BRAND } from '$lib/brand';
+	import Alert from '$lib/ui/Alert.svelte';
 	import { fmtDate, rupees } from '$lib/labels';
 	import Empty from '$lib/ui/Empty.svelte';
 	import Icon from '$lib/ui/Icon.svelte';
@@ -10,7 +11,7 @@
 
 <div class="page narrow">
 	<h1>Admin</h1>
-	{#if form?.error}<p class="alert" role="alert"><Icon name="alert" />{form.error}</p>{/if}
+	{#if form?.error}<Alert message={form.error} />{/if}
 
 	<h2 class="section">Disputes</h2>
 	{#if data.disputes.length === 0}
@@ -20,7 +21,7 @@
 		{#each data.disputes as d (d.id)}
 			<li>
 				<h3>{d.title}</h3>
-				<p class="typed">{d.giver_name} to {d.reader_name} · {d.method} · {rupees(d.total_paise)} paid</p>
+				<p class="typed">{d.giver_name} to {d.reader_name} · {d.method === 'post' ? 'courier' : 'handover'} · {rupees(d.total_paise)} paid</p>
 				<p>{d.dispute_note}</p>
 				<form class="actions" method="post" action="?/resolve">
 					<input type="hidden" name="id" value={d.id} />
@@ -40,6 +41,12 @@
 			<li>
 				<h3>{rupees(f.amount_paise)}, {f.reason}</h3>
 				<p class="typed">{f.status} · {f.attempts} attempts · since {fmtDate(f.created_at)}</p>
+				{#if f.status === 'failed'}
+					<form method="post" action="?/retry">
+						<input type="hidden" name="id" value={f.id} />
+						<button class="btn">Retry refund</button>
+					</form>
+				{/if}
 			</li>
 		{/each}
 	</ul>
@@ -66,7 +73,7 @@
 							<button class="btn">Remove text</button>
 						</form>
 					{/if}
-					{#if r.subject === 'listing'}
+					{#if r.subject === 'listing' && r.listing_status === 'available'}
 						<form method="post" action="?/takedown">
 							<input type="hidden" name="id" value={r.id} />
 							<input type="hidden" name="listing" value={r.listing_id} />

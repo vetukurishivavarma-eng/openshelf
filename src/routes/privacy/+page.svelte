@@ -24,9 +24,9 @@
 	<h2>Who sees it</h2>
 	<ul>
 		<li>Public pages show a book’s title, condition, and its history: how many readers it has had and the cities it has passed through. Never a name.</li>
-		<li>Your WhatsApp number is visible only to the other reader in an order, and only once the giver accepts.</li>
-		<li>Notes and thank-yous are visible only to the two readers, and to admins if one is reported.</li>
-		<li>Addresses are wiped from our records when an order ends. Other readers never see them.</li>
+		<li>Your WhatsApp number is visible only to the other person in an order, only once the giver accepts, and for no more than 7 days after the order ends.</li>
+		<li>A giver’s first name and note reach the reader only once the giver accepts. Notes and thank-yous are visible only to those two people, and to admins if one is reported.</li>
+		<li>Addresses and pincodes are wiped from our records when an order ends. Other readers never see them.</li>
 	</ul>
 
 	<h2>Service providers</h2>
@@ -46,9 +46,13 @@
 
 	<h2>Keeping and deleting data</h2>
 	<p>
-		Deleting your account removes your name, email, phone, city, pincode, listings, notes and thank-yous.
-		We keep payment and order records, which law may require, without your name on them, and the cities
-		in a book’s history. We also keep a salted hash of your Google account id, used only so that a ban
-		on an account still holds if it signs up again.
+		Deleting your account removes your name, email, phone, city, pincode, listings, notes, thank-yous
+		and the text of reports you made. If a courier has a book for one of your orders, you can delete once
+		it has arrived. Banned users can erase their data the same way, by signing in with Google.
+	</p>
+	<p>
+		We keep payment and order records without your name for as long as tax and accounting law requires,
+		and the cities in a book’s history. We also keep a salted hash of your Google account id, used only
+		so that a ban and the monthly order limit still apply if the account signs up again.
 	</p>
 </div>

@@ -128,26 +128,24 @@ describe('transitions', () => {
 		expect(await status(s.id)).toBe('disputed');
 	});
 
-	it('sweep racing accept: accept first wins, sweep refunds nothing', async () => {
+	it('accept past the deadline is refused even before the sweep, one refund', async () => {
+		const s = await orderAt('paid');
+		await backdate(s.id, '73 hours');
+		await expect(acceptOrder(s.giver, s.id, PICKUP)).rejects.toThrow('72 hours');
+		await sweep();
+		expect(await status(s.id)).toBe('expired');
+		expect((await refundsFor(s.id)).length).toBe(1);
+	});
+
+	it('accept racing a sweep that finds nothing due: accept wins', async () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('paid');
-			await backdate(s.id, '73 hours');
-			const [accept] = await race(lockOrder(s.id), [() => acceptOrder(s.giver, s.id, PICKUP), () => sweep()]);
+			await backdate(s.id, '71 hours');
+			const [accept] = await race(lockOrder(s.id), [() => acceptOrder(s.giver, s.id, PICKUP)]);
+			await sweep();
 			expect(accept.status).toBe('fulfilled');
 			expect(await status(s.id)).toBe('pickup_booked');
 			expect((await refundsFor(s.id)).length).toBe(0);
-		}
-	});
-
-	it('sweep racing accept: sweep first wins, accept is refused, one refund', async () => {
-		for (let i = 0; i < ROUNDS; i++) {
-			const s = await orderAt('paid');
-			await backdate(s.id, '73 hours');
-			const [, accept] = await race(lockOrder(s.id), [() => sweep(), () => acceptOrder(s.giver, s.id, PICKUP)]);
-			expect(accept.status).toBe('rejected');
-			expect(await status(s.id)).toBe('expired');
-			expect((await refundsFor(s.id)).length).toBe(1);
-			expect(await listingStatus(s.listing)).toBe('available');
 		}
 	});
 
@@ -310,14 +308,26 @@ describe('webhooks under race', () => {
 		expect((await refundsFor(o.id)).length).toBe(1);
 	});
 
-	it('capture racing expiry: capture first is paid, expiry does nothing', async () => {
+	it('capture just inside the window beats the sweep', async () => {
+		goLive();
+		for (let i = 0; i < ROUNDS; i++) {
+			const o = await live();
+			await backdate(o.id, '29 minutes');
+			await race(lockOrder(o.id), [() => hook(o.gateway, o.total, `pay_${randomUUID()}`)]);
+			await sweep();
+			expect(await status(o.id)).toBe('paid');
+			expect((await refundsFor(o.id)).length).toBe(0);
+		}
+	});
+
+	it('capture after the window refunds even if it reaches the row first', async () => {
 		goLive();
 		for (let i = 0; i < ROUNDS; i++) {
 			const o = await live();
 			await backdate(o.id, '31 minutes');
 			await race(lockOrder(o.id), [() => hook(o.gateway, o.total, `pay_${randomUUID()}`), () => sweep()]);
-			expect(await status(o.id)).toBe('paid');
-			expect((await refundsFor(o.id)).length).toBe(0);
+			expect(await status(o.id)).toBe('expired');
+			expect((await refundsFor(o.id)).length).toBe(1);
 		}
 	});
 

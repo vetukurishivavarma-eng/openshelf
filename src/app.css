@@ -43,7 +43,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); overflow-wrap: anywhere; }
 body > div { display: contents; }
-h1, h2, h3 { line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 0.5em; overflow-wrap: normal; word-break: normal; }
+h1, h2, h3 { line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 0.5em; overflow-wrap: anywhere; }
 h1 { font-size: clamp(1.9rem, 1.5rem + 2vw, 2.75rem); }
 h2 { font-size: 1.4rem; }
 h3 { font-size: 1.1rem; }
@@ -55,8 +55,6 @@ ul, ol { padding: 0; margin: 0; list-style: none; }
 b { font-weight: 700; }
 small { display: block; font-family: var(--serif); font-size: 0.85rem; color: var(--ink-2); font-weight: 400; }
 :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
-/* Kit's announcer relies on an inline style, which the CSP blocks. */
-#svelte-announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .icon { width: 1.25em; height: 1.25em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .typed { font-family: var(--type); font-size: 0.9rem; color: var(--ink-2); line-height: 1.35; }
@@ -201,7 +199,7 @@ summary { padding-block: 0.6rem; line-height: 1.5; cursor: pointer; color: var(-
 .cover { position: relative; flex: none; width: 5.75rem; height: 8.6rem; overflow: hidden; color: #fbf1dc; border-radius: 1px 3px 3px 1px; box-shadow: 2px 2px 0 rgb(42 29 20 / 0.25); }
 .cover::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 0.4rem; background: rgb(0 0 0 / 0.22); }
 .cover div { display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 0.55rem 0.4rem 0.45rem 0.7rem; overflow: hidden; }
-.cover b { font-size: 0.72rem; line-height: 1.2; overflow-wrap: normal; word-break: normal; hyphens: auto; }
+.cover b { font-size: 0.72rem; line-height: 1.2; overflow-wrap: anywhere; hyphens: auto; }
 .cover span { font-family: var(--type); font-size: 0.6rem; line-height: 1.2; }
 .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .cloth-0 { background: #6f2418; }
@@ -211,12 +209,13 @@ summary { padding-block: 0.6rem; line-height: 1.5; cursor: pointer; color: var(-
 
 /* Book page */
 .detail { display: grid; gap: 1.5rem; }
-.detail-cover { position: relative; align-self: start; width: fit-content; margin-inline: auto; padding-right: 2.5rem; }
+.detail-cover { position: relative; align-self: start; width: fit-content; margin-inline: auto; margin-bottom: 2.5rem; padding-right: 2.5rem; }
+.journey { margin-bottom: 1.5rem; }
 .detail-cover .cover { width: 11rem; height: 16.5rem; }
 .detail-cover .cover b { font-size: 1.15rem; }
 .detail-cover .cover span { font-size: 0.85rem; }
 .detail-cover .cover div { padding: 1rem 0.75rem 0.75rem 1.1rem; }
-.detail-cover .stamp { right: 0; bottom: -0.5rem; width: 6rem; height: 6rem; mix-blend-mode: normal; }
+.detail-cover .stamp { right: -0.5rem; bottom: -3rem; width: 6rem; height: 6rem; mix-blend-mode: normal; }
 .detail-cover .stamp .disc { fill: var(--paper); }
 @media (min-width: 48rem) {
 	.detail { grid-template-columns: 17rem minmax(0, 36rem); gap: 3rem; justify-content: center; }
@@ -313,8 +312,6 @@ figcaption, .slip-title { font-weight: 700; font-size: 0.95rem; color: var(--ink
 .tick { display: inline-flex; color: var(--stamp); }
 .now .tick:empty::before { content: ''; width: 0.75rem; height: 0.75rem; margin-left: 0.15rem; background: var(--stamp); border-radius: 50%; }
 .date { font-size: 0.85rem; padding: 0 0.3rem; color: var(--stamp); border: 1.5px solid var(--stamp); transform: rotate(-2deg); white-space: nowrap; }
-
-/* Passbook */
 
 /* Admin, profile, legal */
 .cases li { padding-block: 1rem; border-bottom: 1px solid var(--line); }

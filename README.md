@@ -27,8 +27,9 @@ With no Razorpay or Shiprocket keys the app runs in test mode, labelled on every
 moves". Order pages get a test Pay button and courier controls. Test payments still go through the real
 webhook handler, signed with a per-process random secret.
 
-A production build refuses to start in test mode unless `ALLOW_TEST_PAYMENTS=1`. Half-set Razorpay keys are
-refused everywhere.
+A production build refuses to start in test mode unless `ALLOW_TEST_PAYMENTS=1`. Half-set keys, and one
+provider live with the other in test mode, are refused everywhere. When live keys appear, open test orders
+are cancelled at startup; a test order never books a real courier.
 
 ## Check
 
@@ -46,6 +47,7 @@ With `npm run db` running:
 
 ```sh
 npm run build
+npm run migrate
 ORIGIN=http://localhost:3000 ALLOW_TEST_PAYMENTS=1 SUB_HASH_SALT=local npm start   # http://localhost:3000
 ```
 
@@ -63,8 +65,14 @@ The session cookie is `Secure`, so signing in over plain http works only on loca
    webhook at `https://<host>/webhooks/courier` with that token as its `x-api-key`.
 6. Until the KYC accounts exist, set `ALLOW_TEST_PAYMENTS=1` instead of steps 4 and 5.
 
-Migrations run on every start. The sweep runs at start and hourly. Rate limits live in memory, so run a
+`npm start` does not migrate; run `npm run migrate` first, or use the Render start command, which does. The
+sweep runs at start and every 5 minutes. Rate limits live in memory, so run a
 single instance.
+
+Never rotate `SUB_HASH_SALT`: bans and monthly counts on deleted accounts are keyed by it.
+
+Razorpay's automatic capture is set per order in `createGatewayOrder`. The Checkout hosts in the CSP
+(`svelte.config.js`) are not confirmed by Razorpay's public docs; test them in the sandbox before launch.
 
 ## Layout
 

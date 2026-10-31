@@ -7,15 +7,18 @@ import {
 import type { Condition } from '$lib/server/engine';
 import { attempt, signedIn } from '$lib/server/form';
 import { paymentsTestMode, simulatePayment } from '$lib/server/payments';
+import { allow } from '$lib/server/ratelimit';
 import { NOTE_MAX, UUID, multiline, text } from '$lib/server/validate';
 
-export const load = async ({ params, locals }) => {
+export const load = async ({ params, locals, url }) => {
 	const user = signedIn(locals);
 	if (!UUID.test(params.id)) error(404, 'Order not found');
 	const order = await orderFor(params.id, user.id);
-	if (!order || (order.role === 'giver' && order.status === 'requested')) error(404, 'Order not found');
+	// A giver hears of an order only once it is paid.
+	if (!order || (order.role === 'giver' && !order.paid)) error(404, 'Order not found');
 	return {
 		order,
+		reported: url.searchParams.has('reported'),
 		testControls: testMode() && order.test_mode,
 		// The public half of the key pair; the page cannot pay without it.
 		razorpayKey: paymentsTestMode() ? null : process.env.RAZORPAY_KEY_ID
@@ -27,13 +30,25 @@ type Event = RequestEvent<{ id: string }>;
 function context({ params, locals }: Event) {
 	const user = signedIn(locals);
 	if (!UUID.test(params.id)) error(404, 'Order not found');
-	return { user, id: params.id };
+	return { user, id: params.id, here: `/orders/${params.id}` };
+}
+
+/** Success redirects, so a refresh never re-submits. A repeat lands on the same result. */
+async function run<V extends object = object>(here: string, fn: () => Promise<unknown>, values?: V) {
+	const failed = await attempt(fn, values, here);
+	if (failed) return failed;
+	redirect(303, here);
 }
 
 /** The engine does the party check; this adds sign-in and input shape. */
 const act = (fn: (userId: string, id: string) => Promise<unknown>) => async (event: Event) => {
-	const { user, id } = context(event);
-	return (await attempt(() => fn(user.id, id))) ?? { ok: true };
+	const { user, id, here } = context(event);
+	return run(here, () => fn(user.id, id));
+};
+
+const field = (form: FormData, name: string) => {
+	const v = form.get(name);
+	return typeof v === 'string' ? v : '';
 };
 
 export const actions = {
@@ -43,50 +58,52 @@ export const actions = {
 	received: act(confirmReceived),
 
 	accept: async (event) => {
-		const { user, id } = context(event);
-		const raw = (await event.request.formData()).get('pickup_address');
+		const { user, id, here } = context(event);
+		const raw = field(await event.request.formData(), 'pickup_address');
 		const address = multiline(raw, 500);
-		if (raw && !address) return fail(400, { error: 'Keep the address to 500 characters.' });
-		return (await attempt(() => acceptOrder(user.id, id, address))) ?? { ok: true };
+		if (raw.length > 500) return fail(400, { error: 'Keep the address to 500 characters.', pickup_address: raw });
+		return run(here, () => acceptOrder(user.id, id, address), { pickup_address: raw });
 	},
 
 	dispute: async (event) => {
-		const { user, id } = context(event);
-		const note = text((await event.request.formData()).get('note'), 500);
-		if (!note) return fail(400, { error: 'Tell us what went wrong (up to 500 characters).' });
-		return (await attempt(() => disputeOrder(user.id, id, note))) ?? { ok: true };
+		const { user, id, here } = context(event);
+		const raw = field(await event.request.formData(), 'note');
+		const note = text(raw, 500);
+		if (!note) return fail(400, { error: 'Tell us what went wrong (up to 500 characters).', dispute_note: raw });
+		return run(here, () => disputeOrder(user.id, id, note), { dispute_note: raw });
 	},
 
 	thanks: async (event) => {
-		const { user, id } = context(event);
-		const message = text((await event.request.formData()).get('message'), NOTE_MAX);
-		if (!message) return fail(400, { error: `Write a thank-you of up to ${NOTE_MAX} characters.` });
-		return (await attempt(() => sendThanks(user.id, id, message))) ?? { ok: true };
+		const { user, id, here } = context(event);
+		const raw = field(await event.request.formData(), 'message');
+		const message = text(raw, NOTE_MAX);
+		if (!message) return fail(400, { error: `Write a thank-you of up to ${NOTE_MAX} characters.`, message: raw });
+		return run(here, () => sendThanks(user.id, id, message), { message: raw });
 	},
 
 	onward: async (event) => {
-		const { user, id } = context(event);
+		const { user, id, here } = context(event);
 		const form = await event.request.formData();
 		const condition = form.get('condition');
+		const raw = field(form, 'note');
 		if (condition !== 'like_new' && condition !== 'good' && condition !== 'worn')
-			return fail(400, { error: 'Choose a condition.' });
-		const raw = form.get('note');
+			return fail(400, { error: 'Choose a condition.', onward_note: raw });
 		const note = text(raw, NOTE_MAX);
-		if (typeof raw === 'string' && raw.trim() && !note)
-			return fail(400, { error: `Keep your note to ${NOTE_MAX} characters.` });
+		if (raw.trim() && !note) return fail(400, { error: `Keep your note to ${NOTE_MAX} characters.`, onward_note: raw });
 		let listingId = '';
 		const failed = await attempt(async () => {
 			listingId = await giveOnward(user.id, id, { condition: condition as Condition, note });
-		});
+		}, { onward_note: raw }, here);
 		if (failed) return failed;
 		redirect(303, `/books/${listingId}`);
 	},
 
 	report: async (event) => {
-		const { user, id } = context(event);
-		const form = await event.request.formData();
-		const reason = text(form.get('reason'), 500);
-		if (!reason) return fail(400, { error: 'Tell us what is wrong (up to 500 characters).' });
+		const { user, id, here } = context(event);
+		const raw = field(await event.request.formData(), 'reason');
+		const reason = text(raw, 500);
+		if (!reason) return fail(400, { error: 'Tell us what is wrong (up to 500 characters).', report_reason: raw });
+		if (!allow(`report:${user.id}`, 10, 10)) return fail(429, { error: 'Too many reports. Try again later.', report_reason: raw });
 		const order = await orderFor(id, user.id);
 		if (!order) error(404, 'Order not found');
 		// Each reader can report only what the other one wrote.
@@ -95,27 +112,31 @@ export const actions = {
 			SELECT ${user.id}, o.id, o.listing_id, CASE WHEN o.giver_id = ${user.id} THEN o.reader_id ELSE o.giver_id END,
 				${reason}, ${subject}
 			FROM orders o WHERE o.id = ${id}`;
-		return { reported: true };
+		redirect(303, `${here}?reported`);
 	},
 
 	testpay: async (event) => {
-		const { user, id } = context(event);
+		const { user, id, here } = context(event);
 		if (!paymentsTestMode()) error(404, 'Not found');
 		const [o] = await sql`SELECT gateway_order_id, total_paise FROM orders
 			WHERE id = ${id} AND reader_id = ${user.id} AND status = 'requested' AND test_mode`;
-		if (!o) return fail(400, { error: 'This order cannot be paid.' });
+		if (!o) {
+			const [mine] = await sql`SELECT 1 FROM orders WHERE id = ${id} AND reader_id = ${user.id}`;
+			if (mine) redirect(303, here);
+			return fail(400, { error: 'This order cannot be paid.' });
+		}
 		await simulatePayment({ gateway_order_id: o.gateway_order_id, total_paise: o.total_paise });
-		return { ok: true };
+		redirect(303, here);
 	},
 
 	testcourier: async (event) => {
-		const { user, id } = context(event);
+		const { user, id, here } = context(event);
 		const kind = (await event.request.formData()).get('kind');
 		if (!testMode() || (kind !== 'picked_up' && kind !== 'delivered' && kind !== 'failed')) error(404, 'Not found');
 		const [o] = await sql`SELECT shipment_id FROM orders
 			WHERE id = ${id} AND test_mode AND ${user.id} IN (giver_id, reader_id)`;
 		if (!o?.shipment_id) return fail(400, { error: 'This order has no courier booking.' });
 		await courierEvent(o.shipment_id, kind);
-		return { ok: true };
+		redirect(303, here);
 	}
 };
