@@ -16,12 +16,15 @@ Done:
 3. Rebuilt on the new idea with a clean schema: 399 tests pass, check and build pass, full test-mode order over
    HTTP works. Razorpay and Shiprocket only tested against stubs; new order UI never seen in a browser.
 
+4. Security test done: docs/security-report.md. Verdict: not ready for real money; H1-H3 are launch blockers.
+
 In progress:
-4. QA (browser, retake screenshots) and security testers, reports only.
+5. QA running in the main folder (browser journeys, retaking docs/screens); report not received yet. If the
+   session stopped, restart QA: its findings are NOT saved anywhere.
 
 To do:
-5. Fix findings. Known: refund of a booked order does not cancel the shipment; CSP may block Razorpay Checkout.
-6. Final verification by the product owner.
+6. Lead developer fixes H1-H3, M1-M8, the render.yaml build line, and QA findings. CSP may block Razorpay Checkout.
+7. Final verification by the product owner.
 
 Needed from the owner: Razorpay and Shiprocket/Delhivery accounts (own KYC), Google OAuth client, a durable
 database for launch, a final name and domain.
