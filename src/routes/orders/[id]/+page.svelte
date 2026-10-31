@@ -5,8 +5,8 @@
 	import Icon from '$lib/ui/Icon.svelte';
 	let { data, form } = $props();
 	const o = $derived(data.order);
-	const owner = $derived(o.role === 'owner');
-	const other = $derived(owner ? o.requester_name : o.owner_name);
+	const giver = $derived(o.role === 'giver');
+	const other = $derived(giver ? o.reader_name : o.giver_name);
 	const courier = $derived(o.method === 'post');
 
 	// Hours each open state lasts. Mirrors the windows in sweep(), src/lib/server/engine.ts.
@@ -23,31 +23,31 @@
 			case 'requested':
 				return { act: true, title: `Pay by ${by} to reserve this book`, body: 'The book is held for you until then. Payment makes the reservation final.' };
 			case 'paid':
-				return owner
+				return giver
 					? { act: true, title: `Accept or decline by ${by}`, body: `${other} has paid for this book. If you do nothing, the order expires and ${other} is refunded in full.` }
 					: { act: false, title: `${other} has until ${by} to answer`, body: 'If the giver declines or does not reply, you get a full refund.' };
 			case 'pickup_booked':
 				if (courier)
-					return owner
+					return giver
 						? { act: false, title: 'The courier will collect from you', body: `Keep the book ready. If it is not collected by ${by}, the order is refunded and the book returns to your shelf.` }
 						: { act: false, title: 'The pickup is booked', body: `If the courier cannot collect by ${by}, you get a full refund.` };
-				return owner
+				return giver
 					? { act: true, title: `Hand the book over by ${by}`, body: `Agree a place with ${other} on WhatsApp. Meet somewhere public.` }
 					: { act: true, title: `Agree a handover with ${other}`, body: `Message on WhatsApp and pick a public place. If it does not happen by ${by}, you get a full refund.` };
 			case 'in_transit':
 				return { act: false, title: 'The book is on its way', body: 'The courier has it. We update this page as it moves.' };
 			case 'delivered':
-				return owner
+				return giver
 					? { act: false, title: `${other} confirms by ${by}`, body: 'If they stay silent, the order confirms itself at that time.' }
 					: { act: true, title: `Confirm or raise a problem by ${by}`, body: 'Press the button once the book is with you. If you do neither, the order confirms itself.' };
 			case 'disputed':
 				return { act: false, title: 'An admin is reviewing this order', body: 'There is nothing for you to do. If the dispute is upheld, the reader is refunded in full.' };
 			case 'received':
-				return owner
+				return giver
 					? { act: false, title: 'Your book reached its next reader', body: 'Thank you for passing it on.' }
 					: { act: !o.onward_id, title: 'The book is yours', body: 'Send a thank-you, and when you finish it, give it onward. Its journey carries on.' };
 			case 'declined':
-				return { act: false, title: owner ? 'You declined this order' : `${other} declined this order`, body: owner ? 'The book is back on the shelf.' : 'Your payment is being refunded in full.' };
+				return { act: false, title: giver ? 'You declined this order' : `${other} declined this order`, body: giver ? 'The book is back on the shelf.' : 'Your payment is being refunded in full.' };
 			case 'cancelled':
 				return { act: false, title: 'This order was cancelled', body: 'Any payment is refunded in full.' };
 			case 'expired':
@@ -126,7 +126,7 @@
 					<p class="address">{o.pickup_address}</p>
 				{/if}
 
-				{#if o.status === 'requested' && !owner}
+				{#if o.status === 'requested' && !giver}
 					{#if data.testControls}
 						<form method="post" action="?/testpay"><button class="btn primary wide">Pay {rupees(o.total_paise ?? 0)} (test, no money moves)</button></form>
 					{:else if waiting}
@@ -136,7 +136,7 @@
 					{/if}
 				{/if}
 
-				{#if o.status === 'paid' && owner}
+				{#if o.status === 'paid' && giver}
 					<form method="post" action="?/accept">
 						{#if courier}
 							<label>
@@ -150,15 +150,15 @@
 					<form method="post" action="?/decline"><button class="btn">Decline</button></form>
 				{/if}
 
-				{#if o.status === 'pickup_booked' && owner && !courier}
+				{#if o.status === 'pickup_booked' && giver && !courier}
 					<form method="post" action="?/handover"><button class="btn primary">I have handed it over</button></form>
 				{/if}
 
-				{#if o.status === 'delivered' && !owner}
+				{#if o.status === 'delivered' && !giver}
 					<form method="post" action="?/received"><button class="btn primary">I have the book</button></form>
 				{/if}
 
-				{#if (o.status === 'delivered' || o.status === 'in_transit') && !owner}
+				{#if (o.status === 'delivered' || o.status === 'in_transit') && !giver}
 					<details>
 						<summary>Something wrong?</summary>
 						<form method="post" action="?/dispute">
@@ -171,17 +171,17 @@
 
 			{#if o.note}
 				<section aria-labelledby="note">
-					<h2 id="note">{owner ? 'Your note to the next reader' : 'A note from the last reader'}</h2>
+					<h2 id="note">{giver ? 'Your note to the next reader' : 'A note from the last reader'}</h2>
 					<p class="letter">{o.note}</p>
 				</section>
 			{/if}
 
 			{#if o.thank_you}
 				<section aria-labelledby="thanks">
-					<h2 id="thanks">{owner ? 'A thank-you for you' : 'Your thank-you'}</h2>
+					<h2 id="thanks">{giver ? 'A thank-you for you' : 'Your thank-you'}</h2>
 					<p class="letter">{o.thank_you}</p>
 				</section>
-			{:else if o.status === 'received' && !owner}
+			{:else if o.status === 'received' && !giver}
 				<form method="post" action="?/thanks">
 					<label>
 						Say thank you
@@ -192,7 +192,7 @@
 				</form>
 			{/if}
 
-			{#if o.status === 'received' && !owner}
+			{#if o.status === 'received' && !giver}
 				{#if o.onward_id}
 					<p class="note"><a href="/books/{o.onward_id}">You gave this book onward. See its journey.</a></p>
 				{:else}
@@ -215,7 +215,7 @@
 				{/if}
 			{/if}
 
-			{#if (owner && o.thank_you) || (!owner && o.note)}
+			{#if (giver && o.thank_you) || (!giver && o.note)}
 				<details>
 					<summary>Report this message</summary>
 					<form method="post" action="?/report">
@@ -236,7 +236,7 @@
 				</form>
 			{/if}
 
-			{#if (!owner && (o.status === 'requested' || o.status === 'paid')) || (o.status === 'pickup_booked' && !courier)}
+			{#if (!giver && (o.status === 'requested' || o.status === 'paid')) || (o.status === 'pickup_booked' && !courier)}
 				<form method="post" action="?/cancel"><button class="btn quiet">Cancel order</button></form>
 			{/if}
 		</div>
@@ -244,7 +244,7 @@
 		<aside aria-label="Order progress">
 			<div class="slip due">
 				<p class="slip-title">{courier ? 'By courier' : 'Handover'} · with {other}</p>
-				{#if !owner}
+				{#if !giver}
 					<p class="total">Fee {rupees(o.fee_paise ?? 0)}{#if courier} + courier {rupees(o.courier_paise ?? 0)}{/if} = {rupees(o.total_paise ?? 0)}</p>
 				{/if}
 				<ol>

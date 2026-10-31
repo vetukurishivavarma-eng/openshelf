@@ -16,7 +16,7 @@
 <div class="page narrow">
 	<h1>Orders</h1>
 	{#if data.orders.length === 0}
-		<Empty icon="swap" title="No orders yet">
+		<Empty icon="orders" title="No orders yet">
 			<p>Ask for a book, or give one of yours. Every order, in or out, shows up here with what to do next.</p>
 			<div class="actions">
 				<a class="btn primary" href="/books">Find your next read</a>

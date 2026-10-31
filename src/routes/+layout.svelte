@@ -16,7 +16,7 @@
 					['/books', 'search', 'Browse'],
 					['/list', 'plus', 'Give'],
 					['/shelf', 'shelf', 'Shelf'],
-					['/orders', 'swap', 'Orders'],
+					['/orders', 'orders', 'Orders'],
 					['/me', 'user', 'Profile'],
 					...(data.user.isAdmin ? [['/admin', 'admin', 'Admin']] : [])
 				]

@@ -49,7 +49,7 @@ await sql.begin(async (t) => {
 		ids.push(u.id);
 	}
 	for (const [i, [title, author, isbn, condition]] of books.entries()) {
-		const [l] = await t`INSERT INTO listings (owner_id, title, author, isbn, condition, note)
+		const [l] = await t`INSERT INTO listings (giver_id, title, author, isbn, condition, note)
 			VALUES (${ids[i % ids.length]}, ${title}, ${author}, ${isbn}, ${condition}, 'Read it slowly. It rewards you.')
 			RETURNING journey_id`;
 		await t`INSERT INTO journey_stops (journey_id, city) VALUES (${l.journey_id}, ${readers[i % ids.length][1]})`;

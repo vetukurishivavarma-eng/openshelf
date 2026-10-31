@@ -7,13 +7,13 @@ import {
 import type { Condition } from '$lib/server/engine';
 import { attempt, signedIn } from '$lib/server/form';
 import { paymentsTestMode, simulatePayment } from '$lib/server/payments';
-import { NOTE_MAX, UUID, text } from '$lib/server/validate';
+import { NOTE_MAX, UUID, multiline, text } from '$lib/server/validate';
 
 export const load = async ({ params, locals }) => {
 	const user = signedIn(locals);
 	if (!UUID.test(params.id)) error(404, 'Order not found');
 	const order = await orderFor(params.id, user.id);
-	if (!order || (order.role === 'owner' && order.status === 'requested')) error(404, 'Order not found');
+	if (!order || (order.role === 'giver' && order.status === 'requested')) error(404, 'Order not found');
 	return {
 		order,
 		testControls: testMode() && order.test_mode,
@@ -45,9 +45,9 @@ export const actions = {
 	accept: async (event) => {
 		const { user, id } = context(event);
 		const raw = (await event.request.formData()).get('pickup_address');
-		const address = typeof raw === 'string' ? raw.trim() : '';
-		if (address.length > 500) return fail(400, { error: 'Keep the address to 500 characters.' });
-		return (await attempt(() => acceptOrder(user.id, id, address || null))) ?? { ok: true };
+		const address = multiline(raw, 500);
+		if (raw && !address) return fail(400, { error: 'Keep the address to 500 characters.' });
+		return (await attempt(() => acceptOrder(user.id, id, address))) ?? { ok: true };
 	},
 
 	dispute: async (event) => {
@@ -90,9 +90,9 @@ export const actions = {
 		const order = await orderFor(id, user.id);
 		if (!order) error(404, 'Order not found');
 		// Each reader can report only what the other one wrote.
-		const subject = order.role === 'owner' ? 'thank_you' : 'note';
+		const subject = order.role === 'giver' ? 'thank_you' : 'note';
 		await sql`INSERT INTO reports (reporter_id, order_id, listing_id, user_id, reason, subject)
-			SELECT ${user.id}, o.id, o.listing_id, CASE WHEN o.owner_id = ${user.id} THEN o.requester_id ELSE o.owner_id END,
+			SELECT ${user.id}, o.id, o.listing_id, CASE WHEN o.giver_id = ${user.id} THEN o.reader_id ELSE o.giver_id END,
 				${reason}, ${subject}
 			FROM orders o WHERE o.id = ${id}`;
 		return { reported: true };
@@ -102,7 +102,7 @@ export const actions = {
 		const { user, id } = context(event);
 		if (!paymentsTestMode()) error(404, 'Not found');
 		const [o] = await sql`SELECT gateway_order_id, total_paise FROM orders
-			WHERE id = ${id} AND requester_id = ${user.id} AND status = 'requested' AND test_mode`;
+			WHERE id = ${id} AND reader_id = ${user.id} AND status = 'requested' AND test_mode`;
 		if (!o) return fail(400, { error: 'This order cannot be paid.' });
 		await simulatePayment({ gateway_order_id: o.gateway_order_id, total_paise: o.total_paise });
 		return { ok: true };
@@ -113,7 +113,7 @@ export const actions = {
 		const kind = (await event.request.formData()).get('kind');
 		if (!testMode() || (kind !== 'picked_up' && kind !== 'delivered' && kind !== 'failed')) error(404, 'Not found');
 		const [o] = await sql`SELECT shipment_id FROM orders
-			WHERE id = ${id} AND test_mode AND ${user.id} IN (owner_id, requester_id)`;
+			WHERE id = ${id} AND test_mode AND ${user.id} IN (giver_id, reader_id)`;
 		if (!o?.shipment_id) return fail(400, { error: 'This order has no courier booking.' });
 		await courierEvent(o.shipment_id, kind);
 		return { ok: true };

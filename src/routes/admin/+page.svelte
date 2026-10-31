@@ -20,7 +20,7 @@
 		{#each data.disputes as d (d.id)}
 			<li>
 				<h3>{d.title}</h3>
-				<p class="typed">{d.owner_name} to {d.requester_name} · {d.method} · {rupees(d.total_paise)} paid</p>
+				<p class="typed">{d.giver_name} to {d.reader_name} · {d.method} · {rupees(d.total_paise)} paid</p>
 				<p>{d.dispute_note}</p>
 				<form class="actions" method="post" action="?/resolve">
 					<input type="hidden" name="id" value={d.id} />

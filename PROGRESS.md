@@ -13,16 +13,15 @@ Done:
 1. Core app (v1, credit model): sign-in, browse, listing, admin, security headers, PWA. 150 tests passed.
 2. Design: library-card concept, icon set, landing page, screenshots in docs/screens (out of date after step 3).
 
-In progress when saved:
-3. Lead developer replacing the credit model with orders, Razorpay and courier in test mode, and the book
-   journey; clean schema from scratch; removing all credit and swap terms. The working tree may be mid-rewrite,
-   so run `npm run check` and `npm test` to see the real state. Do not assume this step finished.
+3. Rebuilt on the new idea with a clean schema: 399 tests pass, check and build pass, full test-mode order over
+   HTTP works. Razorpay and Shiprocket only tested against stubs; new order UI never seen in a browser.
+
+In progress:
+4. QA (browser, retake screenshots) and security testers, reports only.
 
 To do:
-4. Finish step 3 if interrupted. Grep case-insensitively for credit, ledger, tier and swap.
-5. Retake screenshots.
-6. QA and security testers run in parallel and try to break payments, refunds, permissions and privacy.
-7. Fix findings, then final verification by the product owner.
+5. Fix findings. Known: refund of a booked order does not cancel the shipment; CSP may block Razorpay Checkout.
+6. Final verification by the product owner.
 
 Needed from the owner: Razorpay and Shiprocket/Delhivery accounts (own KYC), Google OAuth client, a durable
 database for launch, a final name and domain.

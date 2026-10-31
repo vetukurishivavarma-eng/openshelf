@@ -19,18 +19,18 @@ export const load = async ({ locals }) => {
 	admin(locals);
 	const disputes = await sql`
 		SELECT s.id, s.dispute_note, s.status_at, s.total_paise, s.method, l.title,
-			split_part(o.name, ' ', 1) AS owner_name, split_part(r.name, ' ', 1) AS requester_name
+			split_part(o.name, ' ', 1) AS giver_name, split_part(r.name, ' ', 1) AS reader_name
 		FROM orders s JOIN listings l ON l.id = s.listing_id
-		JOIN users o ON o.id = s.owner_id JOIN users r ON r.id = s.requester_id
+		JOIN users o ON o.id = s.giver_id JOIN users r ON r.id = s.reader_id
 		WHERE s.status = 'disputed' ORDER BY s.status_at`;
 	const reports = await sql`
 		SELECT rp.id, rp.reason, rp.created_at, rp.listing_id, rp.subject, l.title,
 			CASE rp.subject WHEN 'note' THEN l.note WHEN 'thank_you' THEN o.thank_you END AS message,
-			COALESCE(rp.user_id, l.owner_id) AS target_id,
+			COALESCE(rp.user_id, l.giver_id) AS target_id,
 			split_part(t.name, ' ', 1) AS target_name, t.banned_at IS NOT NULL AS banned
 		FROM reports rp LEFT JOIN listings l ON l.id = rp.listing_id
 		LEFT JOIN orders o ON o.id = rp.order_id
-		JOIN users t ON t.id = COALESCE(rp.user_id, l.owner_id)
+		JOIN users t ON t.id = COALESCE(rp.user_id, l.giver_id)
 		WHERE rp.resolved_at IS NULL ORDER BY rp.created_at`;
 	const refunds = await sql`SELECT f.id, f.order_id, f.amount_paise, f.reason, f.status, f.attempts, f.created_at
 		FROM refunds f WHERE f.status IN ('pending', 'processing', 'failed') ORDER BY f.created_at`;

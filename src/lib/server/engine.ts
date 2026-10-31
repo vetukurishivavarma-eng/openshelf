@@ -26,8 +26,8 @@ export class OrderError extends Error {}
 export type Order = {
 	id: string;
 	listing_id: string;
-	owner_id: string;
-	requester_id: string;
+	giver_id: string;
+	reader_id: string;
 	method: Method;
 	status: Status;
 	status_at: Date;
@@ -48,10 +48,10 @@ type OrderView = Order & {
 	title: string;
 	author: string;
 	note: string | null;
-	owner_name: string;
-	requester_name: string;
-	owner_whatsapp: string | null;
-	requester_whatsapp: string | null;
+	giver_name: string;
+	reader_name: string;
+	giver_whatsapp: string | null;
+	reader_whatsapp: string | null;
 	refund_status: string | null;
 	onward_id: string | null;
 };
@@ -86,25 +86,25 @@ async function complete(t: Tx, o: Order) {
 	await t`UPDATE listings SET status = 'gone' WHERE id = ${o.listing_id}`;
 	await t`INSERT INTO journey_stops (journey_id, city, order_id)
 		SELECT l.journey_id, u.city, ${o.id}::uuid FROM listings l, users u
-		WHERE l.id = ${o.listing_id} AND u.id = ${o.requester_id} AND u.city IS NOT NULL
+		WHERE l.id = ${o.listing_id} AND u.id = ${o.reader_id} AND u.city IS NOT NULL
 		ON CONFLICT (order_id) DO NOTHING`;
 }
 
 async function load(id: string, userId: string) {
 	const [o] = await sql<Order[]>`SELECT * FROM orders WHERE id = ${id}`;
-	if (!o || (o.owner_id !== userId && o.requester_id !== userId)) throw new OrderError('Order not found.');
+	if (!o || (o.giver_id !== userId && o.reader_id !== userId)) throw new OrderError('Order not found.');
 	return o;
 }
 
-async function ownerOnly(id: string, userId: string) {
+async function giverOnly(id: string, userId: string) {
 	const o = await load(id, userId);
-	if (o.owner_id !== userId) throw new OrderError('Only the giver can do that.');
+	if (o.giver_id !== userId) throw new OrderError('Only the giver can do that.');
 	return o;
 }
 
-async function requesterOnly(id: string, userId: string) {
+async function readerOnly(id: string, userId: string) {
 	const o = await load(id, userId);
-	if (o.requester_id !== userId) throw new OrderError('Only the reader can do that.');
+	if (o.reader_id !== userId) throw new OrderError('Only the reader can do that.');
 	return o;
 }
 
@@ -124,7 +124,7 @@ export async function createListing(
 ) {
 	return tx(async (t) => {
 		const u = await activeUser(t, userId);
-		const [l] = await t`INSERT INTO listings (owner_id, title, author, isbn, condition, note)
+		const [l] = await t`INSERT INTO listings (giver_id, title, author, isbn, condition, note)
 			VALUES (${userId}, ${b.title}, ${b.author}, ${b.isbn}, ${b.condition}, ${b.note})
 			RETURNING id, journey_id`;
 		await t`INSERT INTO journey_stops (journey_id, city) VALUES (${l.journey_id}, ${u.city})`;
@@ -134,18 +134,18 @@ export async function createListing(
 
 export async function removeListing(userId: string, listingId: string) {
 	const rows = await sql`UPDATE listings SET status = 'removed'
-		WHERE id = ${listingId} AND owner_id = ${userId} AND status = 'available' RETURNING id`;
+		WHERE id = ${listingId} AND giver_id = ${userId} AND status = 'available' RETURNING id`;
 	if (!rows.length) throw new OrderError('Only an available listing of yours can be removed.');
 }
 
 /** Relists the same copy, once, and its journey carries on. */
 export async function giveOnward(userId: string, orderId: string, b: { condition: Condition; note: string | null }) {
-	const o = await requesterOnly(orderId, userId);
+	const o = await readerOnly(orderId, userId);
 	return tx(async (t) => {
 		await activeUser(t, userId);
 		const [cur] = await t`SELECT status FROM orders WHERE id = ${orderId}`;
 		if (cur.status !== 'received') throw new OrderError('You can give a book onward once you have received it.');
-		const rows = await t`INSERT INTO listings (owner_id, title, author, isbn, condition, note, journey_id, onward_from)
+		const rows = await t`INSERT INTO listings (giver_id, title, author, isbn, condition, note, journey_id, onward_from)
 			SELECT ${userId}, title, author, isbn, ${b.condition}, ${b.note}, journey_id, ${o.id}
 			FROM listings WHERE id = ${o.listing_id}
 			ON CONFLICT (onward_from) DO NOTHING RETURNING id`;
@@ -158,7 +158,7 @@ export async function giveOnward(userId: string, orderId: string, b: { condition
 
 export async function ordersThisMonth(userId: string) {
 	const [{ n }] = await sql`SELECT count(*)::int AS n FROM orders
-		WHERE requester_id = ${userId} AND status = ANY(${COUNTED})
+		WHERE reader_id = ${userId} AND status = ANY(${COUNTED})
 		AND (created_at AT TIME ZONE 'Asia/Kolkata') >= date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')`;
 	return n as number;
 }
@@ -169,7 +169,7 @@ export async function createOrder(
 	listingId: string,
 	d: { method: Method; address: string | null; pincode: string | null }
 ) {
-	const [seen] = await sql`SELECT l.status, u.pincode FROM listings l JOIN users u ON u.id = l.owner_id
+	const [seen] = await sql`SELECT l.status, u.pincode FROM listings l JOIN users u ON u.id = l.giver_id
 		WHERE l.id = ${listingId}`;
 	if (!seen || seen.status !== 'available') throw new OrderError('This book is no longer available.');
 	if (d.method === 'post' && (!d.address || !d.pincode)) throw new OrderError('Add your delivery address and pincode.');
@@ -178,21 +178,21 @@ export async function createOrder(
 	if (courier === null) throw new OrderError('No courier serves this route yet. Try a local handover.');
 
 	const order = await tx(async (t) => {
-		const [l] = await t`SELECT id, owner_id, status FROM listings WHERE id = ${listingId} FOR UPDATE`;
+		const [l] = await t`SELECT id, giver_id, status FROM listings WHERE id = ${listingId} FOR UPDATE`;
 		if (!l || l.status !== 'available') throw new OrderError('This book is no longer available.');
-		if (l.owner_id === userId) throw new OrderError('This is your own book.');
+		if (l.giver_id === userId) throw new OrderError('This is your own book.');
 
 		// The user row lock serialises this count, which is what holds the cap under parallel requests.
 		await activeUser(t, userId);
 		const [{ n }] = await t`SELECT count(*)::int AS n FROM orders
-			WHERE requester_id = ${userId} AND status = ANY(${COUNTED})
+			WHERE reader_id = ${userId} AND status = ANY(${COUNTED})
 			AND (created_at AT TIME ZONE 'Asia/Kolkata') >= date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')`;
 		if (n >= MONTHLY_CAP)
 			throw new OrderError(`You have reached the limit of ${MONTHLY_CAP} orders this month. It resets on the 1st.`);
 
 		const [o] = await t<Order[]>`INSERT INTO orders
-			(listing_id, owner_id, requester_id, method, fee_paise, courier_paise, test_mode, address, delivery_pincode)
-			VALUES (${listingId}, ${l.owner_id}, ${userId}, ${d.method}, ${FEE_PAISE}, ${courier},
+			(listing_id, giver_id, reader_id, method, fee_paise, courier_paise, test_mode, address, delivery_pincode)
+			VALUES (${listingId}, ${l.giver_id}, ${userId}, ${d.method}, ${FEE_PAISE}, ${courier},
 				${paymentsTestMode()}, ${d.method === 'post' ? d.address : null}, ${d.method === 'post' ? d.pincode : null})
 			RETURNING *`;
 		await t`UPDATE listings SET status = 'reserved' WHERE id = ${listingId}`;
@@ -226,7 +226,7 @@ export async function applyCapture(
 	if (right && o.status === 'requested' && !o.payment_id) {
 		await t`UPDATE orders SET payment_id = ${p.paymentId} WHERE id = ${o.id}`;
 		await move(t, o.id, ['requested'], 'paid');
-		void notify(o.owner_id, 'Someone wants your book', 'A reader has paid. Accept within 72 hours.');
+		void notify(o.giver_id, 'Someone wants your book', 'A reader has paid. Accept within 72 hours.');
 		return null;
 	}
 	// Money arrived that we cannot honour: wrong amount, or too late. It goes straight back.
@@ -243,14 +243,14 @@ export async function applyCapture(
 }
 
 export async function acceptOrder(userId: string, id: string, pickupAddress: string | null) {
-	const current = await ownerOnly(id, userId);
+	const current = await giverOnly(id, userId);
 	if (current.method === 'post' && !pickupAddress) throw new OrderError('Add the address the courier should collect from.');
 	const o = await tx(async (t) => {
 		const o = await move(t, id, ['paid'], 'pickup_booked');
 		if (o.method === 'post') await t`UPDATE orders SET pickup_address = ${pickupAddress} WHERE id = ${id}`;
 		return o;
 	});
-	void notify(o.requester_id, 'Your order was accepted', 'Open the order for what happens next.');
+	void notify(o.reader_id, 'Your order was accepted', 'Open the order for what happens next.');
 	if (o.method !== 'post') return;
 
 	try {
@@ -258,7 +258,7 @@ export async function acceptOrder(userId: string, id: string, pickupAddress: str
 				g.name AS g_name, g.whatsapp AS g_phone, g.city AS g_city, g.pincode AS g_pin,
 				r.name AS r_name, r.whatsapp AS r_phone, r.city AS r_city
 			FROM orders o JOIN listings l ON l.id = o.listing_id
-			JOIN users g ON g.id = o.owner_id JOIN users r ON r.id = o.requester_id
+			JOIN users g ON g.id = o.giver_id JOIN users r ON r.id = o.reader_id
 			WHERE o.id = ${id}`;
 		const shipment = await bookPickup({
 			orderId: id,
@@ -274,20 +274,20 @@ export async function acceptOrder(userId: string, id: string, pickupAddress: str
 }
 
 export async function declineOrder(userId: string, id: string) {
-	await ownerOnly(id, userId);
+	await giverOnly(id, userId);
 	const o = await tx(async (t) => {
 		const o = await move(t, id, ['paid'], 'declined');
 		await release(t, o, 'available', 'declined by the giver');
 		return o;
 	});
 	await flushRefunds(id);
-	void notify(o.requester_id, 'Your order was declined', 'Your payment is being refunded in full.');
+	void notify(o.reader_id, 'Your order was declined', 'Your payment is being refunded in full.');
 }
 
 export async function cancelOrder(userId: string, id: string) {
 	const current = await load(id, userId);
 	const from: Status[] =
-		current.requester_id === userId
+		current.reader_id === userId
 			? ['requested', 'paid', ...(current.method === 'handover' ? (['pickup_booked'] as const) : [])]
 			: current.method === 'handover' ? ['pickup_booked'] : [];
 	if (!from.length) throw new OrderError('This order cannot be cancelled now.');
@@ -297,14 +297,14 @@ export async function cancelOrder(userId: string, id: string) {
 		return o;
 	});
 	await flushRefunds(id);
-	void notify(o.requester_id === userId ? o.owner_id : o.requester_id, 'An order was cancelled', 'Any payment is being refunded in full.');
+	void notify(o.reader_id === userId ? o.giver_id : o.reader_id, 'An order was cancelled', 'Any payment is being refunded in full.');
 }
 
 export async function markHandedOver(userId: string, id: string) {
-	const current = await ownerOnly(id, userId);
+	const current = await giverOnly(id, userId);
 	if (current.method !== 'handover') throw new OrderError('The courier updates this order.');
 	const o = await tx((t) => move(t, id, ['pickup_booked'], 'delivered'));
-	void notify(o.requester_id, 'Your book was handed over', 'Confirm you have it, or raise a problem.');
+	void notify(o.reader_id, 'Your book was handed over', 'Confirm you have it, or raise a problem.');
 }
 
 export async function pickupFailed(id: string) {
@@ -314,8 +314,8 @@ export async function pickupFailed(id: string) {
 		return o;
 	});
 	await flushRefunds(id);
-	void notify(o.requester_id, 'The pickup failed', 'Your payment is being refunded in full.');
-	void notify(o.owner_id, 'The pickup failed', 'The book is back on your shelf.');
+	void notify(o.reader_id, 'The pickup failed', 'Your payment is being refunded in full.');
+	void notify(o.giver_id, 'The pickup failed', 'The book is back on your shelf.');
 }
 
 /** Courier scans arrive late, twice and out of order; anything already past the step is ignored. */
@@ -325,10 +325,10 @@ export async function courierEvent(shipmentId: string, kind: 'picked_up' | 'deli
 	try {
 		if (kind === 'picked_up' && o.status === 'pickup_booked') {
 			await tx((t) => move(t, o.id, ['pickup_booked'], 'in_transit'));
-			void notify(o.requester_id, 'Your book is on its way', 'The courier has collected it.');
+			void notify(o.reader_id, 'Your book is on its way', 'The courier has collected it.');
 		} else if (kind === 'delivered' && (o.status === 'pickup_booked' || o.status === 'in_transit')) {
 			await tx((t) => move(t, o.id, ['pickup_booked', 'in_transit'], 'delivered'));
-			void notify(o.requester_id, 'Your book was delivered', 'Confirm you have it, or raise a problem.');
+			void notify(o.reader_id, 'Your book was delivered', 'Confirm you have it, or raise a problem.');
 		} else if (kind === 'failed' && o.status === 'pickup_booked') {
 			await pickupFailed(o.id);
 		} else if (kind === 'failed' && o.status === 'in_transit') {
@@ -349,15 +349,15 @@ async function confirm(id: string) {
 }
 
 export async function confirmReceived(userId: string, id: string) {
-	await requesterOnly(id, userId);
+	await readerOnly(id, userId);
 	const o = await confirm(id);
-	void notify(o.owner_id, 'Your book reached its next reader', 'A thank-you may follow.');
+	void notify(o.giver_id, 'Your book reached its next reader', 'A thank-you may follow.');
 }
 
 export async function disputeOrder(userId: string, id: string, note: string) {
-	await requesterOnly(id, userId);
+	await readerOnly(id, userId);
 	const o = await tx((t) => move(t, id, ['in_transit', 'delivered'], 'disputed', note));
-	void notify(o.owner_id, 'An order was disputed', 'An admin will review it.');
+	void notify(o.giver_id, 'An order was disputed', 'An admin will review it.');
 }
 
 /** Caller must have checked the admin role. `refunded` upholds the dispute. */
@@ -370,33 +370,33 @@ export async function resolveDispute(id: string, outcome: 'received' | 'refunded
 	});
 	await flushRefunds(id);
 	const text = outcome === 'received' ? 'The order stands as completed.' : 'The payment is being refunded in full.';
-	void notify(o.owner_id, 'Dispute resolved', text);
-	void notify(o.requester_id, 'Dispute resolved', text);
+	void notify(o.giver_id, 'Dispute resolved', text);
+	void notify(o.reader_id, 'Dispute resolved', text);
 }
 
 export async function sendThanks(userId: string, id: string, message: string) {
-	const o = await requesterOnly(id, userId);
+	const o = await readerOnly(id, userId);
 	const rows = await sql`UPDATE orders SET thank_you = ${message}, thanked_at = now()
 		WHERE id = ${id} AND status = 'received' AND thank_you IS NULL RETURNING id`;
 	if (!rows.length) throw new OrderError('A thank-you can be sent once, after the book arrives.');
-	void notify(o.owner_id, 'A thank-you for your book', 'Open the order to read it.');
+	void notify(o.giver_id, 'A thank-you for your book', 'Open the order to read it.');
 }
 
 /** A viewer-scoped order: null for non-parties. Each private field has its own rule. */
 export async function orderFor(id: string, viewerId: string) {
 	const [o] = await sql<OrderView[]>`
 		SELECT o.*, l.title, l.author, l.note,
-			split_part(g.name, ' ', 1) AS owner_name, split_part(r.name, ' ', 1) AS requester_name,
-			g.whatsapp AS owner_whatsapp, r.whatsapp AS requester_whatsapp,
+			split_part(g.name, ' ', 1) AS giver_name, split_part(r.name, ' ', 1) AS reader_name,
+			g.whatsapp AS giver_whatsapp, r.whatsapp AS reader_whatsapp,
 			(SELECT status FROM refunds f WHERE f.order_id = o.id ORDER BY created_at LIMIT 1) AS refund_status,
 			(SELECT id FROM listings n WHERE n.onward_from = o.id) AS onward_id
 		FROM orders o
 		JOIN listings l ON l.id = o.listing_id
-		JOIN users g ON g.id = o.owner_id
-		JOIN users r ON r.id = o.requester_id
-		WHERE o.id = ${id} AND ${viewerId} IN (o.owner_id, o.requester_id)`;
+		JOIN users g ON g.id = o.giver_id
+		JOIN users r ON r.id = o.reader_id
+		WHERE o.id = ${id} AND ${viewerId} IN (o.giver_id, o.reader_id)`;
 	if (!o) return null;
-	const isOwner = o.owner_id === viewerId;
+	const isGiver = o.giver_id === viewerId;
 	const shared = ['pickup_booked', 'in_transit', 'delivered', 'disputed', 'received'].includes(o.status);
 	return {
 		id: o.id,
@@ -406,22 +406,22 @@ export async function orderFor(id: string, viewerId: string) {
 		title: o.title,
 		author: o.author,
 		listing_id: o.listing_id,
-		owner_name: o.owner_name,
-		requester_name: o.requester_name,
-		role: isOwner ? ('owner' as const) : ('requester' as const),
+		giver_name: o.giver_name,
+		reader_name: o.reader_name,
+		role: isGiver ? ('giver' as const) : ('reader' as const),
 		thank_you: o.thank_you,
 		onward_id: o.onward_id,
 		refund_status: o.refund_status,
 		test_mode: o.test_mode,
-		whatsapp: shared ? (isOwner ? o.requester_whatsapp : o.owner_whatsapp) : null,
-		note: isOwner || shared || o.status === 'paid' ? o.note : null,
+		whatsapp: shared ? (isGiver ? o.reader_whatsapp : o.giver_whatsapp) : null,
+		note: isGiver || shared || o.status === 'paid' ? o.note : null,
 		// The courier needs these; the other reader never does.
-		address: isOwner ? null : o.address,
-		pickup_address: isOwner ? o.pickup_address : null,
-		fee_paise: isOwner ? null : o.fee_paise,
-		courier_paise: isOwner ? null : o.courier_paise,
-		total_paise: isOwner ? null : o.total_paise,
-		gateway_order_id: isOwner ? null : o.gateway_order_id
+		address: isGiver ? null : o.address,
+		pickup_address: isGiver ? o.pickup_address : null,
+		fee_paise: isGiver ? null : o.fee_paise,
+		courier_paise: isGiver ? null : o.courier_paise,
+		total_paise: isGiver ? null : o.total_paise,
+		gateway_order_id: isGiver ? null : o.gateway_order_id
 	};
 }
 
@@ -431,9 +431,10 @@ export async function orderFor(id: string, viewerId: string) {
 async function closeAccount(t: Tx, userId: string) {
 	await t`DELETE FROM sessions WHERE user_id = ${userId}`;
 	// Stop new orders first; anything already in flight is then visible to the query below.
-	await t`UPDATE listings SET status = 'removed' WHERE owner_id = ${userId} AND status = 'available'`;
+	await t`UPDATE listings SET status = 'removed' WHERE giver_id = ${userId} AND status = 'available'`;
 	const open = await t<{ id: string; status: Status }[]>`SELECT id, status FROM orders
-		WHERE status IN ('requested', 'paid', 'pickup_booked') AND ${userId} IN (owner_id, requester_id)`;
+		WHERE status IN ('requested', 'paid', 'pickup_booked') AND ${userId} IN (giver_id, reader_id)
+		FOR UPDATE`;
 	const moved: Order[] = [];
 	for (const { id, status } of open) {
 		const o = await move(t, id, [status], status === 'pickup_booked' ? 'refunded' : 'cancelled');
@@ -442,16 +443,16 @@ async function closeAccount(t: Tx, userId: string) {
 	}
 	// A book already moving stays open: it reaches the reader, who confirms or disputes, and
 	// auto-confirm or an admin ends it. Only the private details go now.
-	await t`UPDATE orders SET address = NULL WHERE requester_id = ${userId}`;
-	await t`UPDATE orders SET pickup_address = NULL WHERE owner_id = ${userId}`;
-	await t`UPDATE listings SET status = 'removed' WHERE owner_id = ${userId} AND status <> 'gone'`;
+	await t`UPDATE orders SET address = NULL WHERE reader_id = ${userId}`;
+	await t`UPDATE orders SET pickup_address = NULL WHERE giver_id = ${userId}`;
+	await t`UPDATE listings SET status = 'removed' WHERE giver_id = ${userId} AND status = 'available'`;
 	return moved;
 }
 
 async function afterClose(moved: Order[], userId: string) {
 	for (const o of moved) {
 		await flushRefunds(o.id);
-		void notify(o.owner_id === userId ? o.requester_id : o.owner_id, 'An order was cancelled', 'The other reader’s account closed. Any payment is being refunded in full.');
+		void notify(o.giver_id === userId ? o.reader_id : o.giver_id, 'An order was cancelled', 'The other reader’s account closed. Any payment is being refunded in full.');
 	}
 }
 
@@ -470,8 +471,8 @@ export async function deleteAccount(userId: string) {
 		await t`UPDATE users SET deleted_at = now(), name = 'Former reader', google_sub = NULL,
 			deleted_sub_hash = ${u.google_sub ? subHash(u.google_sub) : null},
 			email = NULL, city = NULL, pincode = NULL, whatsapp = NULL WHERE id = ${userId}`;
-		await t`UPDATE listings SET note = NULL WHERE owner_id = ${userId}`;
-		await t`UPDATE orders SET thank_you = NULL WHERE requester_id = ${userId}`;
+		await t`UPDATE listings SET note = NULL WHERE giver_id = ${userId}`;
+		await t`UPDATE orders SET thank_you = NULL WHERE reader_id = ${userId}`;
 		return closeAccount(t, userId);
 	});
 	await afterClose(moved, userId);
@@ -496,7 +497,7 @@ export async function sweep() {
 				try {
 					if (status === 'delivered') {
 						const o = await confirm(id);
-						void notify(o.owner_id, 'Your book reached its next reader', 'The order confirmed itself after 14 days.');
+						void notify(o.giver_id, 'Your book reached its next reader', 'The order confirmed itself after 14 days.');
 					} else if (status === 'in_transit') {
 						await tx((t) => move(t, id, ['in_transit'], 'disputed', 'No delivery scan for 21 days.'));
 					} else if (status === 'pickup_booked' && method === 'post') {
@@ -509,8 +510,8 @@ export async function sweep() {
 						});
 						await flushRefunds(id);
 						if (o.payment_id) {
-							void notify(o.requester_id, 'Your order expired', 'Your payment is being refunded in full.');
-							void notify(o.owner_id, 'An order expired', 'The book is available again.');
+							void notify(o.reader_id, 'Your order expired', 'Your payment is being refunded in full.');
+							void notify(o.giver_id, 'An order expired', 'The book is available again.');
 						}
 					}
 				} catch (e) {
@@ -518,17 +519,17 @@ export async function sweep() {
 					if (!(e instanceof OrderError)) console.error('[sweep]', id, e);
 				}
 			}
-			const warn = await sql<{ status: Status; owner_id: string; requester_id: string }[]>`
+			const warn = await sql<{ status: Status; giver_id: string; reader_id: string }[]>`
 				UPDATE orders SET warned_at = now()
 				WHERE warned_at IS NULL AND (
 					(status = 'paid' AND status_at < now() - interval '48 hours')
 					OR (status = 'pickup_booked' AND status_at < now() - interval '4 days')
 					OR (status = 'delivered' AND status_at < now() - interval '13 days'))
-				RETURNING status, owner_id, requester_id`;
+				RETURNING status, giver_id, reader_id`;
 			for (const w of warn) {
 				if (w.status === 'delivered')
-					void notify(w.requester_id, 'Order closes tomorrow', 'It confirms itself in a day unless you raise a problem.');
-				else void notify(w.owner_id, 'Order expires tomorrow', 'Act within a day or it is refunded.');
+					void notify(w.reader_id, 'Order closes tomorrow', 'It confirms itself in a day unless you raise a problem.');
+				else void notify(w.giver_id, 'Order expires tomorrow', 'Act within a day or it is refunded.');
 			}
 			await flushRefunds();
 			await sql`DELETE FROM sessions WHERE expires_at < now()`;

@@ -52,11 +52,11 @@ function captured(gatewayOrderId: string, amount: number, paymentId = `pay_${ran
 const deliver = (raw: string, eventId: string = randomUUID()) => handleWebhook(raw, sign(raw), eventId);
 
 async function liveOrder(method: 'post' | 'handover' = 'handover') {
-	const owner = await newUser();
-	const requester = await newUser();
-	const listing = await newListing(owner);
-	const o = await createOrder(requester, listing, details(method));
-	return { owner, requester, listing, id: o.id, gateway: o.gateway_order_id!, total: o.total_paise };
+	const giver = await newUser();
+	const reader = await newUser();
+	const listing = await newListing(giver);
+	const o = await createOrder(reader, listing, details(method));
+	return { giver, reader, listing, id: o.id, gateway: o.gateway_order_id!, total: o.total_paise };
 }
 
 describe('webhook authenticity', () => {
@@ -121,7 +121,7 @@ describe('webhook idempotency', () => {
 
 	it('a replay of a late payment refunds once', async () => {
 		const o = await liveOrder();
-		await cancelOrder(o.requester, o.id);
+		await cancelOrder(o.reader, o.id);
 		const raw = captured(o.gateway, o.total);
 		const id = randomUUID();
 		await deliver(raw, id);
@@ -224,14 +224,14 @@ describe('out-of-order events', () => {
 			throw new Error('replaced below');
 		};
 		vi.stubGlobal('fetch', async () => fetchRefund());
-		await declineOrder(o.owner, o.id);
+		await declineOrder(o.giver, o.id);
 		expect((await refundsFor(o.id))[0].status).toBe('processed');
 	});
 
 	it('refund.failed surfaces for an admin; refund.processed afterwards settles it', async () => {
 		const o = await liveOrder();
 		await deliver(captured(o.gateway, o.total, 'pay_f'));
-		await declineOrder(o.owner, o.id);
+		await declineOrder(o.giver, o.id);
 		const event = (kind: string) =>
 			JSON.stringify({ event: kind, payload: { refund: { entity: { id: 'r', payment_id: 'pay_f' } } } });
 		await deliver(event('refund.failed'));
@@ -253,7 +253,7 @@ describe('refund delivery', () => {
 
 	it('sends the full amount with an idempotency key', async () => {
 		const o = await paid();
-		await declineOrder(o.owner, o.id);
+		await declineOrder(o.giver, o.id);
 		const [c] = refundCalls();
 		const r = await row(o.id);
 		expect(c.url).toContain(`/payments/${r.payment_id}/refund`);
@@ -272,7 +272,7 @@ describe('refund delivery', () => {
 	it('a provider failure stays queued, and sweep retries with the same key', async () => {
 		const o = await paid();
 		refundResponse = () => new Response('nope', { status: 500 });
-		await declineOrder(o.owner, o.id);
+		await declineOrder(o.giver, o.id);
 		expect((await refundsFor(o.id))[0].status).toBe('pending');
 		refundResponse = () => Response.json({ id: 'rfnd_ok' });
 		await sweep();
@@ -287,7 +287,7 @@ describe('refund delivery', () => {
 	it('a refund stuck by a crash is retried only after the delay', async () => {
 		const o = await paid();
 		refundResponse = () => new Response('nope', { status: 500 });
-		await declineOrder(o.owner, o.id);
+		await declineOrder(o.giver, o.id);
 		const before = refundCalls().length;
 		await sql`UPDATE refunds SET status = 'processing', attempted_at = now() WHERE order_id = ${o.id}`;
 		await flushRefunds(o.id);
@@ -301,7 +301,7 @@ describe('refund delivery', () => {
 	it('gives up after 10 attempts, visibly', async () => {
 		const o = await paid();
 		refundResponse = () => new Response('nope', { status: 500 });
-		await declineOrder(o.owner, o.id);
+		await declineOrder(o.giver, o.id);
 		for (let i = 0; i < 12; i++) await flushRefunds(o.id);
 		const [f] = await refundsFor(o.id);
 		expect([f.status, f.attempts]).toEqual(['failed', 10]);
@@ -312,7 +312,7 @@ describe('refund delivery', () => {
 		delete process.env.RAZORPAY_KEY_ID;
 		const s = await orderAt('paid');
 		goLive();
-		await declineOrder(s.owner, s.id);
+		await declineOrder(s.giver, s.id);
 		expect(refundCalls().length).toBe(0);
 		expect((await refundsFor(s.id))[0].provider_refund_id).toMatch(/^test_rfnd_/);
 	});
@@ -423,7 +423,7 @@ describe('courier, Shiprocket shape', () => {
 	it('a booking failure is a pickup failure: refunded in full', async () => {
 		const s = await orderAt('paid');
 		live({});
-		await acceptOrder(s.owner, s.id, PICKUP);
+		await acceptOrder(s.giver, s.id, PICKUP);
 		expect(await status(s.id)).toBe('refunded');
 		expect((await refundsFor(s.id)).length).toBe(1);
 		expect(await listingStatus(s.listing)).toBe('available');
@@ -469,5 +469,21 @@ describe('courier webhook', () => {
 		await post({ shipment_id: (await row(s.id)).shipment_id, current_status: 'PICKUP EXCEPTION' }, 'tok');
 		expect(await status(s.id)).toBe('refunded');
 		expect((await post({ shipment_id: 'nope', current_status: 'DELIVERED' }, 'tok')).status).toBe(200);
+	});
+});
+
+describe('event id idempotency on its own', () => {
+	beforeEach(goLive);
+
+	it('a replayed refund.failed does not undo a refund that has since gone through', async () => {
+		const o = await liveOrder();
+		await deliver(captured(o.gateway, o.total, 'pay_replay'));
+		await declineOrder(o.giver, o.id);
+		const raw = JSON.stringify({ event: 'refund.failed', payload: { refund: { entity: { id: 'r', payment_id: 'pay_replay' } } } });
+		const id = randomUUID();
+		await deliver(raw, id);
+		await sql`UPDATE refunds SET status = 'sent' WHERE order_id = ${o.id}`; // An admin retried it by hand.
+		await deliver(raw, id);
+		expect((await refundsFor(o.id))[0].status).toBe('sent');
 	});
 });

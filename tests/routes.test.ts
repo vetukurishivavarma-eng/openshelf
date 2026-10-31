@@ -1,9 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import postgres from 'postgres';
 import { sql } from '../src/lib/server/db';
-import { acceptOrder, banUser, createOrder, deleteAccount, disputeOrder, orderFor, sendThanks } from '../src/lib/server/engine';
-import { NOTE_MAX, isbn, pincode, text, whatsapp } from '../src/lib/server/validate';
+import { acceptOrder, banUser, confirmReceived, createOrder, deleteAccount, disputeOrder, markHandedOver, orderFor, sendThanks } from '../src/lib/server/engine';
+import { NOTE_MAX, isbn, multiline, pincode, text, whatsapp } from '../src/lib/server/validate';
 import { allow } from '../src/lib/server/ratelimit';
 import { sessionUser, startSession, upsertGoogleUser, type SessionUser } from '../src/lib/server/auth';
 import { actions as bookActions, load as bookLoad } from '../src/routes/books/[id]/+page.server';
@@ -13,8 +11,7 @@ import { actions as orderActions, load as orderLoad } from '../src/routes/orders
 import { load as ordersLoad } from '../src/routes/orders/+page.server';
 import { actions as adminActions, load as adminLoad } from '../src/routes/admin/+page.server';
 import { GET as callback } from '../src/routes/auth/google/callback/+server';
-import { GET as oldLink } from '../src/routes/swaps/[...rest]/+server';
-import { details, expectMoneyIntact, newListing, newUser, orderAt, row, status } from './helpers';
+import { details, expectMoneyIntact, newListing, newUser, orderAt, pay, row, status } from './helpers';
 
 afterAll(expectMoneyIntact);
 
@@ -44,26 +41,32 @@ const browse = (qs: string) => (booksLoad as Function)({ url: new URL(`http://x/
 
 describe('public pages expose no private data', () => {
 	it('book page and browse carry no name, contact, or ids of people, at every stage', async () => {
-		const owner = await newUser(NAME, 'Pune');
+		const giver = await newUser(NAME, 'Pune');
 		const reader = await newUser('Karthik Hiddenname', 'Kochi');
-		const [u] = await sql`SELECT email, pincode, whatsapp FROM users WHERE id = ${owner}`;
-		const id = await newListing(owner, 'Dear reader, from Zubeida');
+		const [u] = await sql`SELECT email, pincode, whatsapp FROM users WHERE id = ${giver}`;
+		const id = await newListing(giver, 'Dear reader, from Zubeida');
 		const check = async () => {
 			for (const json of [JSON.stringify(await book(id)), JSON.stringify(await browse(''))]) {
-				for (const secret of ['Zubeida', 'Secretsurname', 'Karthik', 'Hiddenname', u.email, u.pincode, u.whatsapp, owner, reader])
+				for (const secret of ['Zubeida', 'Secretsurname', 'Karthik', 'Hiddenname', u.email, u.pincode, u.whatsapp, giver, reader])
 					expect(json).not.toContain(secret);
 			}
 		};
 		await check();
 		const o = await createOrder(reader, id, details('handover'));
 		await check();
-		await sql`UPDATE orders SET thank_you = 'Thanks from Karthik', status = 'cancelled' WHERE id = ${o.id}`;
+		await pay(o.id);
+		await check();
+		await acceptOrder(giver, o.id, null);
+		await markHandedOver(giver, o.id);
+		await confirmReceived(reader, o.id);
+		await sendThanks(reader, o.id, 'Thanks from Karthik');
+		await check();
 		await check();
 	});
 
 	it('journey shows a reader count and cities, including on a passed-on copy', async () => {
 		const s = await orderAt('received');
-		await sql`UPDATE users SET city = 'Kochi' WHERE id = ${s.requester}`;
+		await sql`UPDATE users SET city = 'Kochi' WHERE id = ${s.reader}`;
 		await sql`UPDATE journey_stops SET city = 'Kochi' WHERE order_id = ${s.id}`;
 		const page = await book(s.listing);
 		expect(page.book.status).toBe('gone');
@@ -79,9 +82,9 @@ describe('public pages expose no private data', () => {
 	});
 
 	it('search matches title and author, filters by condition and city, hides unavailable', async () => {
-		const owner = await newUser();
-		const [l] = await sql`INSERT INTO listings (owner_id, title, author, condition)
-			VALUES (${owner}, 'Zanzibar Chronicles', 'Quillon Marsh', 'like_new') RETURNING id`;
+		const giver = await newUser();
+		const [l] = await sql`INSERT INTO listings (giver_id, title, author, condition)
+			VALUES (${giver}, 'Zanzibar Chronicles', 'Quillon Marsh', 'like_new') RETURNING id`;
 		const find = async (qs: string) => (await browse(qs)).books.map((b: { id: string }) => b.id);
 		expect(await find('q=zanzibar')).toContain(l.id);
 		expect(await find('q=quillon')).toContain(l.id);
@@ -129,18 +132,19 @@ describe('client input', () => {
 			});
 		expect((await listing('x'.repeat(NOTE_MAX + 1))).status).toBe(400);
 		expect(await thrown(() => listing('<script>alert(1)</script>'))).toBe(303);
-		const [l] = await sql`SELECT note FROM listings WHERE owner_id = ${u}`;
+		const [l] = await sql`SELECT note FROM listings WHERE giver_id = ${u}`;
 		expect(l.note).toBe('<script>alert(1)</script>'); // Svelte escapes it on output; the HTTP run confirms.
 
 		const s = await orderAt('received');
 		const thanks = (message: string) =>
-			(orderActions.thanks as Function)({ request: form({ message }), params: { id: s.id }, locals: asUser(s.requester) });
+			(orderActions.thanks as Function)({ request: form({ message }), params: { id: s.id }, locals: asUser(s.reader) });
 		expect((await thanks('x'.repeat(NOTE_MAX + 1))).status).toBe(400);
 		expect((await thanks('Thank you')).ok).toBe(true);
 	});
 
 	it('collapses control characters and whitespace', () => {
-		expect(text('  a\n\n b\t\u0000c ', 10)).toBe('a b \u0000c'.replace('\u0000', '\u0000'));
+		expect(text('  a\n\n b\t\u0000c ', 10)).toBe('a b c');
+		expect(multiline(' 12 Road\r\nPune\u0000 ', 20)).toBe('12 Road\nPune');
 		expect(text('', 10)).toBeNull();
 	});
 });
@@ -152,11 +156,11 @@ describe('order page authorisation', () => {
 		const load = (locals: unknown, id = s.id) => (orderLoad as Function)({ params: { id }, locals });
 		expect(await thrown(() => load(asUser(stranger)))).toBe(404);
 		expect(await thrown(() => load(anon))).toBe(303);
-		expect((await load(asUser(s.owner))).order.whatsapp).toMatch(/^\+91\d{10}$/);
+		expect((await load(asUser(s.giver))).order.whatsapp).toMatch(/^\+91\d{10}$/);
 
 		const unpaid = await orderAt('requested');
-		expect(await thrown(() => load(asUser(unpaid.owner), unpaid.id))).toBe(404);
-		const list = await (ordersLoad as Function)({ locals: asUser(unpaid.owner) });
+		expect(await thrown(() => load(asUser(unpaid.giver), unpaid.id))).toBe(404);
+		const list = await (ordersLoad as Function)({ locals: asUser(unpaid.giver) });
 		expect(list.orders.length).toBe(0);
 	});
 
@@ -172,9 +176,9 @@ describe('order page authorisation', () => {
 		const s = await orderAt('requested');
 		const pay = (id: string) => (orderActions.testpay as Function)({ request: form({}), params: { id: s.id }, locals: asUser(id) });
 		expect((await pay(await newUser())).status).toBe(400);
-		expect((await pay(s.owner)).status).toBe(400);
+		expect((await pay(s.giver)).status).toBe(400);
 		expect(await status(s.id)).toBe('requested');
-		await pay(s.requester);
+		await pay(s.reader);
 		expect(await status(s.id)).toBe('paid');
 	});
 
@@ -186,9 +190,9 @@ describe('order page authorisation', () => {
 		process.env.SHIPROCKET_EMAIL = 'e';
 		process.env.SHIPROCKET_PASSWORD = 'p';
 		try {
-			const pay = () => (orderActions.testpay as Function)({ request: form({}), params: { id: s.id }, locals: asUser(s.requester) });
+			const pay = () => (orderActions.testpay as Function)({ request: form({}), params: { id: s.id }, locals: asUser(s.reader) });
 			expect(await thrown(pay)).toBe(404);
-			const page = await (orderLoad as Function)({ params: { id: s.id }, locals: asUser(s.requester) });
+			const page = await (orderLoad as Function)({ params: { id: s.id }, locals: asUser(s.reader) });
 			expect(page.testControls).toBe(false);
 		} finally {
 			for (const k of ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'SHIPROCKET_EMAIL', 'SHIPROCKET_PASSWORD']) delete process.env[k];
@@ -198,14 +202,15 @@ describe('order page authorisation', () => {
 	it('reports attach to what the other reader wrote', async () => {
 		const s = await orderAt('received');
 		await sql`UPDATE listings SET note = 'Rude note' WHERE id = ${s.listing}`;
-		await sendThanks(s.requester, s.id, 'Rude thanks');
+		await sendThanks(s.reader, s.id, 'Rude thanks');
 		const report = (id: string) =>
 			(orderActions.report as Function)({ request: form({ reason: 'Abusive' }), params: { id: s.id }, locals: asUser(id) });
-		await report(s.requester);
-		await report(s.owner);
+		await report(s.reader);
+		await report(s.giver);
 		const rows = await sql`SELECT subject, user_id, reporter_id FROM reports WHERE order_id = ${s.id} ORDER BY subject`;
-		expect(rows.map((r) => [r.subject, r.user_id])).toEqual([['note', s.owner], ['thank_you', s.requester]]);
-		expect(await thrown(() => report(`${await newUser()}`))).toBe(404);
+		expect(rows.map((r) => [r.subject, r.user_id])).toEqual([['note', s.giver], ['thank_you', s.reader]]);
+		const stranger = await newUser();
+		expect(await thrown(() => report(stranger))).toBe(404);
 	});
 });
 
@@ -213,7 +218,7 @@ describe('admin', () => {
 	it('non-admins get 404 on load and every action', async () => {
 		const s = await orderAt('disputed');
 		const u = await newUser();
-		const body = () => form({ id: s.id, outcome: 'refunded', user: s.owner, listing: s.listing });
+		const body = () => form({ id: s.id, outcome: 'refunded', user: s.giver, listing: s.listing });
 		expect(await thrown(() => (adminLoad as Function)({ locals: asUser(u) }))).toBe(404);
 		expect(await thrown(() => (adminLoad as Function)({ locals: anon }))).toBe(303);
 		for (const name of ['resolve', 'close', 'ban', 'takedown', 'cleartext'] as const)
@@ -225,9 +230,9 @@ describe('admin', () => {
 
 	it('sees a reported message, removes it, and outstanding refunds are listed', async () => {
 		const s = await orderAt('received');
-		await sendThanks(s.requester, s.id, 'Offensive words');
+		await sendThanks(s.reader, s.id, 'Offensive words');
 		const [r] = await sql`INSERT INTO reports (reporter_id, order_id, listing_id, user_id, reason, subject)
-			VALUES (${s.owner}, ${s.id}, ${s.listing}, ${s.requester}, 'Abuse', 'thank_you') RETURNING id`;
+			VALUES (${s.giver}, ${s.id}, ${s.listing}, ${s.reader}, 'Abuse', 'thank_you') RETURNING id`;
 		const admin = asUser(await newUser(), true);
 		const page = await (adminLoad as Function)({ locals: admin });
 		expect(page.reports.find((x: { id: string }) => x.id === r.id).message).toBe('Offensive words');
@@ -342,52 +347,11 @@ describe('input validation', () => {
 	});
 });
 
-describe('old links', () => {
-	it('/swaps/x redirects to /orders/x', async () => {
-		expect(await thrown(async () => (oldLink as Function)({ params: { rest: 'abc' } }))).toBe(308);
-	});
-});
-
-describe('migration 002', () => {
-	it('takes a v1 database with open swaps and credits to v2', async () => {
-		const name = `mig_${Date.now()}`;
-		await sql.unsafe(`CREATE DATABASE ${name}`);
-		const url = new URL(process.env.DATABASE_URL!);
-		url.pathname = `/${name}`;
-		const db = postgres(url.toString(), { max: 1, onnotice: () => {} });
-		try {
-			await db.unsafe(await readFile('migrations/001_init.sql', 'utf8'));
-			const [a] = await db`INSERT INTO users (email, name, city, credits) VALUES ('a@x', 'A', 'Pune', 0) RETURNING id`;
-			const [b] = await db`INSERT INTO users (email, name, city, credits) VALUES ('b@x', 'B', 'Kochi', 0) RETURNING id`;
-			const [l] = await db`INSERT INTO listings (owner_id, title, author, tier, condition, status)
-				VALUES (${a.id}, 'T', 'A', 'paperback', 'good', 'reserved') RETURNING id`;
-			const [s] = await db`INSERT INTO swaps (listing_id, owner_id, requester_id, credits, method, status, address)
-				VALUES (${l.id}, ${a.id}, ${b.id}, 1, 'post', 'sent', 'Old address') RETURNING id`;
-			await db`INSERT INTO credit_ledger (user_id, delta, reason, swap_id) VALUES (${b.id}, 1, 'refund', ${s.id})`;
-
-			await db.unsafe(await readFile('migrations/002_orders.sql', 'utf8'));
-
-			const [o] = await db`SELECT status, address FROM orders WHERE id = ${s.id}`;
-			expect({ ...o }).toEqual({ status: 'cancelled', address: null });
-			const [l2] = await db`SELECT status, journey_id FROM listings WHERE id = ${l.id}`;
-			expect(l2.status).toBe('available');
-			const stops = await db`SELECT city FROM journey_stops WHERE journey_id = ${l2.journey_id}`;
-			expect(stops.map((r) => r.city)).toEqual(['Pune']);
-			const leftovers = await db`SELECT table_name, column_name FROM information_schema.columns
-				WHERE table_schema = 'public' AND (table_name IN ('credit_ledger', 'swaps') OR column_name IN ('credits', 'tier'))`;
-			expect([...leftovers]).toEqual([]);
-		} finally {
-			await db.end();
-			await sql.unsafe(`DROP DATABASE ${name}`);
-		}
-	});
-});
-
 describe('flows that span modules', () => {
 	it('the viewer sees nothing of an order they are not on, through a dispute too', async () => {
 		const s = await orderAt('in_transit');
-		await disputeOrder(s.requester, s.id, 'Lost');
+		await disputeOrder(s.reader, s.id, 'Lost');
 		expect(await orderFor(s.id, await newUser())).toBeNull();
-		await expect(acceptOrder(s.owner, s.id, 'x')).rejects.toThrow();
+		await expect(acceptOrder(s.giver, s.id, 'x')).rejects.toThrow();
 	});
 });

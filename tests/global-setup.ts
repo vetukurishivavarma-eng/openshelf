@@ -2,8 +2,8 @@ import { rmSync } from 'node:fs';
 import EmbeddedPostgres from 'embedded-postgres';
 import { migrate } from '../scripts/migrate.mjs';
 
-const databaseDir = '.pgdata-test';
-const port = 54321;
+const databaseDir = '.pgtest';
+const port = 54331;
 
 export default async function setup() {
 	rmSync(databaseDir, { recursive: true, force: true });

@@ -3,7 +3,14 @@ export const NOTE_MAX = 280;
 /** Trimmed single-line text, or null if empty or over max. */
 export function text(value: FormDataEntryValue | null, max: number): string | null {
 	if (typeof value !== 'string') return null;
-	const s = value.replace(/\s+/g, ' ').trim();
+	const s = value.replace(/[\s\p{Cc}]+/gu, ' ').trim();
+	return s && s.length <= max ? s : null;
+}
+
+/** The same for an address: line breaks survive. Control characters would break Postgres. */
+export function multiline(value: FormDataEntryValue | null, max: number): string | null {
+	if (typeof value !== 'string') return null;
+	const s = value.replace(/\r\n/g, '\n').replace(/[^\P{Cc}\n]+/gu, ' ').trim();
 	return s && s.length <= max ? s : null;
 }
 

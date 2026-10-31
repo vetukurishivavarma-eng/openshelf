@@ -19,10 +19,10 @@ export async function newUser(name = 'Test Reader', city = 'Pune') {
 	return u.id as string;
 }
 
-export async function newListing(ownerId: string, note: string | null = null) {
-	const [o] = await sql`SELECT city FROM users WHERE id = ${ownerId}`;
-	const [l] = await sql`INSERT INTO listings (owner_id, title, author, condition, note)
-		VALUES (${ownerId}, 'A Book', 'An Author', 'good', ${note}) RETURNING id, journey_id`;
+export async function newListing(giverId: string, note: string | null = null) {
+	const [o] = await sql`SELECT city FROM users WHERE id = ${giverId}`;
+	const [l] = await sql`INSERT INTO listings (giver_id, title, author, condition, note)
+		VALUES (${giverId}, 'A Book', 'An Author', 'good', ${note}) RETURNING id, journey_id`;
 	await sql`INSERT INTO journey_stops (journey_id, city) VALUES (${l.journey_id}, ${o.city})`;
 	return l.id as string;
 }
@@ -59,39 +59,39 @@ export async function pay(id: string) {
 
 /** A fresh order driven to `target` through the real engine. */
 export async function orderAt(target: Status, method: Method = 'post') {
-	const owner = await newUser();
-	const requester = await newUser();
-	const listing = await newListing(owner);
-	const { id } = await createOrder(requester, listing, details(method));
-	const ids = { id, owner, requester, listing, method };
+	const giver = await newUser();
+	const reader = await newUser();
+	const listing = await newListing(giver);
+	const { id } = await createOrder(reader, listing, details(method));
+	const ids = { id, giver, reader, listing, method };
 	if (target === 'requested') return ids;
 	await pay(id);
 	if (target === 'paid') return ids;
-	if (target === 'declined') return await declineOrder(owner, id), ids;
-	if (target === 'cancelled') return await cancelOrder(requester, id), ids;
+	if (target === 'declined') return await declineOrder(giver, id), ids;
+	if (target === 'cancelled') return await cancelOrder(reader, id), ids;
 	if (target === 'expired') {
 		await backdate(id, '73 hours');
 		await sweep();
 		return ids;
 	}
-	await acceptOrder(owner, id, method === 'post' ? PICKUP : null);
+	await acceptOrder(giver, id, method === 'post' ? PICKUP : null);
 	if (target === 'pickup_booked') return ids;
 	const shipment = (await row(id)).shipment_id;
-	if (method === 'handover') await markHandedOver(owner, id);
+	if (method === 'handover') await markHandedOver(giver, id);
 	else {
 		await courierEvent(shipment, 'picked_up');
 		if (target === 'in_transit') return ids;
 		await courierEvent(shipment, 'delivered');
 	}
 	if (target === 'delivered') return ids;
-	if (target === 'received') return await confirmReceived(requester, id), ids;
-	await disputeOrder(requester, id, 'Never arrived');
+	if (target === 'received') return await confirmReceived(reader, id), ids;
+	await disputeOrder(reader, id, 'Never arrived');
 	if (target === 'refunded') await resolveDispute(id, 'refunded');
 	return ids;
 }
 
 /**
- * The invariant replacing credits = SUM(delta): a paid order that closed without completing has
+ * The money invariant: a paid order that closed without completing has
  * exactly one full refund, and a paid order that is open or completed has none.
  */
 export async function expectMoneyIntact() {
@@ -107,7 +107,8 @@ export async function expectMoneyIntact() {
 	const unpaid = await sql`SELECT o.id FROM orders o
 		WHERE o.payment_id IS NULL AND o.status IN ('paid', 'pickup_booked', 'in_transit', 'delivered', 'disputed', 'received')`;
 	expect([...unpaid]).toEqual([]);
-	const stale = await sql`SELECT l.id FROM listings l WHERE (l.status = 'reserved') <> EXISTS (
+	const stale = await sql`SELECT l.id, l.status, (SELECT array_agg(o.status) FROM orders o WHERE o.listing_id = l.id) AS orders,
+		(SELECT banned_at IS NOT NULL OR deleted_at IS NOT NULL FROM users u WHERE u.id = l.giver_id) AS closed FROM listings l WHERE (l.status = 'reserved') <> EXISTS (
 		SELECT 1 FROM orders o WHERE o.listing_id = l.id
 			AND o.status IN ('requested', 'paid', 'pickup_booked', 'in_transit', 'delivered', 'disputed'))`;
 	expect([...stale]).toEqual([]);

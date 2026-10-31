@@ -95,10 +95,10 @@ describe('buyers', () => {
 
 	it('ban racing an order on their listing leaves nothing stranded', async () => {
 		for (let i = 0; i < ROUNDS; i++) {
-			const owner = await newUser();
-			const listing = await newListing(owner);
+			const giver = await newUser();
+			const listing = await newListing(giver);
 			const u = await newUser();
-			await Promise.allSettled([createOrder(u, listing, details('post')), banUser(owner)]);
+			await Promise.allSettled([createOrder(u, listing, details('post')), banUser(giver)]);
 			expect(await listingStatus(listing)).toBe('removed');
 			const open = await sql`SELECT 1 FROM orders WHERE listing_id = ${listing} AND status = 'requested'`;
 			expect(open.length).toBe(0);
@@ -111,8 +111,8 @@ describe('transitions', () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('delivered');
 			const r = await race(lockOrder(s.id), [
-				() => confirmReceived(s.requester, s.id),
-				() => disputeOrder(s.requester, s.id, 'never came')
+				() => confirmReceived(s.reader, s.id),
+				() => disputeOrder(s.reader, s.id, 'never came')
 			]);
 			expect(wins(r)).toBe(1);
 			expect(await status(s.id)).toBe('received');
@@ -122,8 +122,8 @@ describe('transitions', () => {
 	it('dispute first wins the other way', async () => {
 		const s = await orderAt('delivered');
 		await race(lockOrder(s.id), [
-			() => disputeOrder(s.requester, s.id, 'never came'),
-			() => confirmReceived(s.requester, s.id)
+			() => disputeOrder(s.reader, s.id, 'never came'),
+			() => confirmReceived(s.reader, s.id)
 		]);
 		expect(await status(s.id)).toBe('disputed');
 	});
@@ -132,7 +132,7 @@ describe('transitions', () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('paid');
 			await backdate(s.id, '73 hours');
-			const [accept] = await race(lockOrder(s.id), [() => acceptOrder(s.owner, s.id, PICKUP), () => sweep()]);
+			const [accept] = await race(lockOrder(s.id), [() => acceptOrder(s.giver, s.id, PICKUP), () => sweep()]);
 			expect(accept.status).toBe('fulfilled');
 			expect(await status(s.id)).toBe('pickup_booked');
 			expect((await refundsFor(s.id)).length).toBe(0);
@@ -143,7 +143,7 @@ describe('transitions', () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('paid');
 			await backdate(s.id, '73 hours');
-			const [, accept] = await race(lockOrder(s.id), [() => sweep(), () => acceptOrder(s.owner, s.id, PICKUP)]);
+			const [, accept] = await race(lockOrder(s.id), [() => sweep(), () => acceptOrder(s.giver, s.id, PICKUP)]);
 			expect(accept.status).toBe('rejected');
 			expect(await status(s.id)).toBe('expired');
 			expect((await refundsFor(s.id)).length).toBe(1);
@@ -155,7 +155,7 @@ describe('transitions', () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('delivered');
 			await backdate(s.id, '337 hours');
-			await race(lockOrder(s.id), [() => confirmReceived(s.requester, s.id), () => sweep()]);
+			await race(lockOrder(s.id), [() => confirmReceived(s.reader, s.id), () => sweep()]);
 			expect(await status(s.id)).toBe('received');
 			const stops = await sql`SELECT 1 FROM journey_stops WHERE order_id = ${s.id}`;
 			expect(stops.length).toBe(1);
@@ -192,10 +192,10 @@ describe('transitions', () => {
 	it('give onward and thank-you apply once under parallel clicks', async () => {
 		const s = await orderAt('received');
 		const onward = await Promise.allSettled(
-			[1, 2, 3, 4].map(() => giveOnward(s.requester, s.id, { condition: 'good', note: null }))
+			[1, 2, 3, 4].map(() => giveOnward(s.reader, s.id, { condition: 'good', note: null }))
 		);
 		expect(wins(onward)).toBe(1);
-		const thanks = await Promise.allSettled([1, 2, 3].map(() => sendThanks(s.requester, s.id, 'Thanks')));
+		const thanks = await Promise.allSettled([1, 2, 3].map(() => sendThanks(s.reader, s.id, 'Thanks')));
 		expect(wins(thanks)).toBe(1);
 		const n = await sql`SELECT 1 FROM listings WHERE onward_from = ${s.id}`;
 		expect(n.length).toBe(1);
@@ -215,7 +215,7 @@ describe('refunds exactly once', () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('paid');
 			await backdate(s.id, '73 hours');
-			await race(lockOrder(s.id), [() => declineOrder(s.owner, s.id), () => sweep()]);
+			await race(lockOrder(s.id), [() => declineOrder(s.giver, s.id), () => sweep()]);
 			expect((await refundsFor(s.id)).length).toBe(1);
 		}
 	});
@@ -223,7 +223,7 @@ describe('refunds exactly once', () => {
 	it('cancel racing decline', async () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('paid');
-			const r = await race(lockOrder(s.id), [() => cancelOrder(s.requester, s.id), () => declineOrder(s.owner, s.id)]);
+			const r = await race(lockOrder(s.id), [() => cancelOrder(s.reader, s.id), () => declineOrder(s.giver, s.id)]);
 			expect(wins(r)).toBe(1);
 			expect((await refundsFor(s.id)).length).toBe(1);
 		}
@@ -252,7 +252,7 @@ describe('refunds exactly once', () => {
 	it('ban racing a decline', async () => {
 		for (let i = 0; i < ROUNDS; i++) {
 			const s = await orderAt('paid');
-			await Promise.allSettled([banUser(s.owner), declineOrder(s.owner, s.id)]);
+			await Promise.allSettled([banUser(s.giver), declineOrder(s.giver, s.id)]);
 			expect((await refundsFor(s.id)).length).toBe(1);
 		}
 	});
@@ -280,11 +280,11 @@ describe('webhooks under race', () => {
 		return handleWebhook(raw, createHmac('sha256', SECRET).update(raw).digest('hex'), eventId);
 	};
 	const live = async () => {
-		const owner = await newUser();
-		const requester = await newUser();
-		const listing = await newListing(owner);
-		const o = await createOrder(requester, listing, details('handover'));
-		return { owner, requester, listing, id: o.id, gateway: o.gateway_order_id!, total: o.total_paise };
+		const giver = await newUser();
+		const reader = await newUser();
+		const listing = await newListing(giver);
+		const o = await createOrder(reader, listing, details('handover'));
+		return { giver, reader, listing, id: o.id, gateway: o.gateway_order_id!, total: o.total_paise };
 	};
 
 	it('the same event delivered in parallel applies once', async () => {
@@ -303,7 +303,7 @@ describe('webhooks under race', () => {
 	it('a late payment replayed in parallel reaches the provider once', async () => {
 		const refunds = goLive();
 		const o = await live();
-		await cancelOrder(o.requester, o.id);
+		await cancelOrder(o.reader, o.id);
 		const paymentId = `pay_${randomUUID()}`;
 		await race(lockOrder(o.id), [1, 2, 3, 4].map(() => () => hook(o.gateway, o.total, paymentId)));
 		expect(refunds.length).toBe(1);
@@ -339,7 +339,7 @@ describe('webhooks under race', () => {
 		for (const first of ['capture', 'cancel'] as const) {
 			const o = await live();
 			const capture = () => hook(o.gateway, o.total, `pay_${randomUUID()}`);
-			const cancel = () => cancelOrder(o.requester, o.id);
+			const cancel = () => cancelOrder(o.reader, o.id);
 			await race(lockOrder(o.id), first === 'capture' ? [capture, cancel] : [cancel, capture]);
 			expect(await status(o.id)).toBe('cancelled');
 			expect((await refundsFor(o.id)).length).toBe(1);
