@@ -1,0 +1,4 @@
+body { max-width: 26rem; margin: 15vh auto 0; padding: 0 1rem; font: 1.0625rem/1.55 Georgia, serif; color: #2a1d14; background: #f3eadb; }
+h1 { font-size: 1.75rem; line-height: 1.15; margin: 1rem 0 0.5rem; }
+a { display: inline-block; padding: 0.75rem 1.1rem; font-weight: 700; color: #fffaf0; background: #a2291a; border: 2px solid #2a1d14; border-radius: 2px; text-decoration: none; }
+a:focus-visible { outline: 3px solid #2a1d14; outline-offset: 2px; }

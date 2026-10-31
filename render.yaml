@@ -1,0 +1,55 @@
+databases:
+  - name: openshelf-db
+    databaseName: openshelf
+    plan: basic-256mb
+
+services:
+  - type: web
+    name: openshelf
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: node scripts/migrate.mjs && node build
+    healthCheckPath: /terms
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: openshelf-db
+          property: connectionString
+      # Real client IP for the sign-in rate limit.
+      - key: ADDRESS_HEADER
+        value: True-Client-IP
+      - key: ORIGIN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: SUB_HASH_SALT
+        generateValue: true
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: SHIPROCKET_EMAIL
+        sync: false
+      - key: SHIPROCKET_PASSWORD
+        sync: false
+      - key: SHIPROCKET_WEBHOOK_TOKEN
+        sync: false
+      # Set to 1 only to run on test payments before the KYC accounts exist. No money moves.
+      - key: ALLOW_TEST_PAYMENTS
+        sync: false
