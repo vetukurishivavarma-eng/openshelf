@@ -58,7 +58,7 @@
 			case 'expired':
 				return { act: false, title: 'This order ran out of time', body: 'Any payment is refunded in full.' };
 			default:
-				return { act: false, title: 'This order was refunded', body: 'The full amount is on its way back to the reader.' };
+				return { act: false, title: 'This order was refunded', body: `The full amount is on its way back to ${giver ? other : 'you'}.` };
 		}
 	});
 

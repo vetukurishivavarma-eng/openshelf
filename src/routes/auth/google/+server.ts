@@ -12,6 +12,7 @@ export const GET = (event) => {
 	if (!allow(`signin:${ip}`, 20, 20)) error(429, 'Too many sign-in attempts. Try again later.');
 
 	const clientId = process.env.GOOGLE_CLIENT_ID;
+	if (!clientId && process.env.TEST_LOGIN_PASSWORD) redirect(303, '/test-login');
 	if (!clientId) error(503, 'Google sign-in is not configured.');
 
 	const state = randomToken();

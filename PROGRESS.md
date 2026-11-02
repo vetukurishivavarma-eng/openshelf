@@ -1,6 +1,6 @@
 # OpenShelf progress
 
-## RESUME HERE (saved 2026-10-31)
+## RESUME HERE (saved 2026-11-02)
 
 Idea: givers give books free. Readers pay a ₹39 platform fee plus courier. Each book shows its journey
 (note to the next reader, thank-you back, reader count and cities). Source of truth: SPEC.md, top section.
@@ -31,6 +31,27 @@ Done:
    viewed and closed. Fixed: status crumb now matches the slip, dispute text addressed to the viewer, spacing
    under the action box, a flaky test helper (phone numbers collided between test files). 446 tests pass,
    3 runs in a row. Not walked in a browser: admin resolving a dispute, cancel, decline, expiry.
+
+8a. DONE 2026-11-02: the remaining flows walked as real users in Chromium (test mode, 360 and 1280): reader cancels
+   unpaid and paid, giver declines, giver cancels an agreed handover (reader has no cancel button), reader
+   disputes, admin upholds and rejects disputes, unpaid order expires after 30 min and paid-unanswered after 72 h
+   (rows backdated, startup sweep). All passed, no console errors, no 5xx, no sideways scroll. Refunds sit at
+   "sent" in test mode (only the real Razorpay webhook moves them to "processed"; expected). Fixed: an upheld
+   dispute told the reader the money goes back "to the reader"; now "to you". Walk script was in the session
+   scratchpad, not kept.
+
+8b. Added /test-login (commit after 7fd1c94): password sign-in for a TEST deployment with no Google OAuth client.
+   On only when TEST_LOGIN_PASSWORD is set; /auth/google redirects there when GOOGLE_CLIENT_ID is unset.
+   Anyone with the password can sign in as any email, admins included. Delete the route and unset the var before
+   launch (marked ponytail:). 448 tests pass, check 0 errors, build passes.
+
+Repo: github.com/vetukurishivavarma-eng/openshelf, local branch wip/openshelf pushes to origin main.
+
+NEXT (owner chose 2026-11-02): Render FREE tier (free web + free Postgres, deleted after 30 days, fine for testing),
+ALLOW_TEST_PAYMENTS=1, TEST_LOGIN_PASSWORD set, no Google/Razorpay/Shiprocket yet. render.yaml still says paid
+plans (starter + basic-256mb): create the services by hand or edit the plans. Then an APK "like Specskart": a
+native shell (Capacitor, own icon and splash, no browser bar) loading the Render URL, released on GitHub. NOT an
+Expo rewrite (owner chose the shell). The owner said they will do their part later.
 
 Partly open: M5 (is True-Client-IP safe on Render?), L1 (real fix needs phone verification), L4 (salt must never
 rotate). L2 and log-out-everywhere have no tests.
