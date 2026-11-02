@@ -294,7 +294,7 @@ figcaption, .slip-title { font-weight: 700; font-size: 0.95rem; color: var(--ink
 .crumb a { display: inline-flex; align-items: center; min-height: 44px; }
 .order { display: grid; gap: 1.5rem; margin-top: 1rem; }
 @media (min-width: 48rem) { .order { grid-template-columns: minmax(0, 1fr) 20rem; gap: 2.5rem; align-items: start; } }
-.next { padding: 1.1rem; background: var(--card); border: 1.5px solid var(--edge); margin-bottom: 0.75rem; }
+.next { padding: 1.1rem; background: var(--card); border: 1.5px solid var(--edge); margin-bottom: 1.5rem; }
 .next.act { border: 2px solid var(--stamp); box-shadow: 4px 4px 0 var(--stamp); }
 .next > .typed { margin-bottom: 0.25rem; font-weight: 700; }
 .next.act > .typed { color: var(--stamp); }

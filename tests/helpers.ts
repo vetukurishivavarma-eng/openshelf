@@ -14,7 +14,7 @@ export async function newUser(name = 'Test Reader', city = 'Pune') {
 	const i = ++n;
 	const [u] = await sql`INSERT INTO users (google_sub, email, name, city, pincode, whatsapp)
 		VALUES (${`t${i}-${process.pid}-${Date.now()}`}, ${`t${i}-${process.pid}@x.test`}, ${name}, ${city}, '411001',
-			${`+919${String(process.pid % 1000).padStart(3, '0')}${String(i).padStart(6, '0')}`})
+			${`+91${String(process.pid % 100000).padStart(5, '0')}${String(i).padStart(5, '0')}`})
 		RETURNING id`;
 	return u.id as string;
 }

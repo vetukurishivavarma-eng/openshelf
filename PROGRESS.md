@@ -25,11 +25,19 @@ Done:
    developer, not re-run independently. docs/security-report.md, docs/qa-report.md and docs/screens predate these
    fixes (their "OPEN" status is stale). Dev DB must be recreated: schema changed and UTF8 is now required.
 
+7. DONE 2026-11-01: courier and handover orders walked as real users in Chromium (reader and giver, test mode):
+   request, pay, accept, pickup or handover, delivered, received, thank-you, onward, dispute. No console errors,
+   no failed requests, no sideways scroll at 360 or 1280. Order screens in docs/screens retaken and viewed; L12
+   viewed and closed. Fixed: status crumb now matches the slip, dispute text addressed to the viewer, spacing
+   under the action box, a flaky test helper (phone numbers collided between test files). 446 tests pass,
+   3 runs in a row. Not walked in a browser: admin resolving a dispute, cancel, decline, expiry.
+
 Partly open: M5 (is True-Client-IP safe on Render?), L1 (real fix needs phone verification), L4 (salt must never
-rotate), L12 (visual change not viewed). L2 and log-out-everywhere have no tests.
+rotate). L2 and log-out-everywhere have no tests.
+
+If `npm test` hangs with no output: an interrupted run left a Postgres worker holding port 54331. Stop it.
 
 To do:
-7. Retake screenshots and view the order pages in a browser once usage allows.
 8. Real-service testing, needs the owner's accounts: Razorpay sandbox (CSP hosts, inline styles, auto-capture),
    Shiprocket (API cancel may fail after AWB, sending every timeout to admin), Google, Resend, Render, a real phone.
 9. Legal review of /terms and /privacy; add operator and grievance contact.
@@ -39,4 +47,4 @@ Needed from the owner: Razorpay and Shiprocket/Delhivery accounts (own KYC), Goo
 database for launch, a final name and domain.
 
 Never verified so far: real Google sign-in, real email, Render deployment, real phone, PWA install, barcode scan.
-Do not deploy until steps 3 to 7 pass. Local dev commands are in README.md.
+Do not deploy until step 8 passes. Local dev commands are in README.md.

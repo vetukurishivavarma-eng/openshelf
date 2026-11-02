@@ -46,7 +46,7 @@
 					? { act: false, title: `${Other} confirms by ${by}`, body: 'If they stay silent, the order confirms itself at that time.' }
 					: { act: true, title: `Confirm or raise a problem by ${by}`, body: 'Press the button once the book is with you. If you do neither, the order confirms itself.' };
 			case 'disputed':
-				return { act: false, title: 'An admin is reviewing this order', body: 'There is nothing for you to do. If the dispute is upheld, the reader is refunded in full.' };
+				return { act: false, title: 'An admin is reviewing this order', body: `There is nothing for you to do. If the dispute is upheld, ${giver ? `${other} is` : 'you are'} refunded in full.` };
 			case 'received':
 				if (giver) return { act: false, title: 'Your book reached its next reader', body: 'Thank you for passing it on.' };
 				if (o.onward_id) return { act: false, title: 'The book is yours', body: o.thank_you ? 'You thanked the giver and gave it onward. Its journey carries on.' : 'You gave it onward. Its journey carries on.' };
@@ -110,7 +110,7 @@
 <svelte:head><title>{o.title} · {BRAND.name}</title></svelte:head>
 
 <div class="page">
-	<p class="typed crumb"><a href="/orders">Orders</a> / {ORDER_STATUS[o.status]}</p>
+	<p class="typed crumb"><a href="/orders">Orders</a> / {stepName(o.status)}</p>
 	<h1>{o.title}</h1>
 	<p class="by large">{o.author}</p>
 
