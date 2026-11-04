@@ -7,8 +7,10 @@
   https://openshelf-y68z.onrender.com (deploys origin main), DB `openshelf-db` dpg-dblmnsm1egvs73b2fc1g-a
   (free, EXPIRES 2026-12-04). Env set: NODE_VERSION 22, NODE_ENV, ADDRESS_HEADER=True-Client-IP,
   ALLOW_TEST_PAYMENTS=1, TEST_LOGIN_PASSWORD, SUB_HASH_SALT, ADMIN_EMAILS=admin@openshelf.test, ORIGIN.
-  **MISSING: DATABASE_URL** (Render MCP can't read DB credentials; owner pastes the Internal Database URL).
-  After it's live: check M5 (send a fake True-Client-IP header; Render's edge must overwrite it).
+  DATABASE_URL set (Internal URL, read from the dashboard). LIVE 2026-11-04: /, /books, /terms, /test-login,
+  manifest 200; /auth/google -> /test-login; CSP/HSTS/XFO headers present.
+  M5 CLOSED: 11+ test-login posts each with a different fake True-Client-IP still hit 429 -> Render's edge
+  overwrites the header, the sign-in limit can't be dodged.
 - android-shell/: Capacitor 8.5.3 wrapper loading the Render URL (icon/splash from static/, back = page back).
   Signed with C:/Users/Shiva/openshelf-keystore (NOT in git; copy keystore.properties to android-shell/android/).
   Build: cd android-shell && npm run apk. APK -> Downloads/openshelf-1.0.apk (vc1, verified). Not yet on GitHub
@@ -69,8 +71,8 @@ plans (starter + basic-256mb): create the services by hand or edit the plans. Th
 native shell (Capacitor, own icon and splash, no browser bar) loading the Render URL, released on GitHub. NOT an
 Expo rewrite (owner chose the shell). The owner said they will do their part later.
 
-Partly open: M5 (is True-Client-IP safe on Render?), L1 (real fix needs phone verification), L4 (salt must never
-rotate). L2 and log-out-everywhere have no tests.
+Partly open: L1 (real fix needs phone verification), L4 (salt must never
+rotate).
 
 If `npm test` hangs with no output: an interrupted run left a Postgres worker holding port 54331. Stop it.
 
