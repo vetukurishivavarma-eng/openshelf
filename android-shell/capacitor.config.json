@@ -1,0 +1,10 @@
+{
+  "appId": "app.openshelf.android",
+  "appName": "OpenShelf",
+  "webDir": "www",
+  "server": {
+    "url": "https://openshelf-y68z.onrender.com",
+    "allowNavigation": ["openshelf-y68z.onrender.com"]
+  },
+  "android": { "allowMixedContent": false }
+}
