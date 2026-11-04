@@ -1,6 +1,22 @@
 # OpenShelf progress
 
-## RESUME HERE (saved 2026-11-02)
+## RESUME HERE (saved 2026-11-04)
+
+2026-11-04: test deploy + APK.
+- Render (workspace "Appilication Dev", Singapore, FREE): web `openshelf` srv-dblmofh5efls73e83eug =
+  https://openshelf-y68z.onrender.com (deploys origin main), DB `openshelf-db` dpg-dblmnsm1egvs73b2fc1g-a
+  (free, EXPIRES 2026-12-04). Env set: NODE_VERSION 22, NODE_ENV, ADDRESS_HEADER=True-Client-IP,
+  ALLOW_TEST_PAYMENTS=1, TEST_LOGIN_PASSWORD, SUB_HASH_SALT, ADMIN_EMAILS=admin@openshelf.test, ORIGIN.
+  **MISSING: DATABASE_URL** (Render MCP can't read DB credentials; owner pastes the Internal Database URL).
+  After it's live: check M5 (send a fake True-Client-IP header; Render's edge must overwrite it).
+- android-shell/: Capacitor 8.5.3 wrapper loading the Render URL (icon/splash from static/, back = page back).
+  Signed with C:/Users/Shiva/openshelf-keystore (NOT in git; copy keystore.properties to android-shell/android/).
+  Build: cd android-shell && npm run apk. APK -> Downloads/openshelf-1.0.apk (vc1, verified). Not yet on GitHub
+  releases (needs owner OK). Known limit: Google sign-in is blocked inside WebViews -> needs a Custom Tab flow
+  before real Google login works in the app.
+- tests/limits-sessions.test.ts: L2 + sign-out-everywhere now covered. 451 tests pass, check 0 errors.
+
+## Earlier (saved 2026-11-02)
 
 Idea: givers give books free. Readers pay a ₹39 platform fee plus courier. Each book shows its journey
 (note to the next reader, thank-you back, reader count and cities). Source of truth: SPEC.md, top section.
